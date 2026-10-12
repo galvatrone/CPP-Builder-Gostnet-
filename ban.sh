@@ -29,6 +29,8 @@ BUILD_MODE="${BAN_BUILD_MODE:-auto}"
 
 usage() {
     cat <<'HELP'
+Commands: ghostnet build|run|test|check [options] [folder]
+
 GHOSTNET — build helper for Linux, Windows and macOS
 
 Run without arguments for the arrow-key menu (↑/↓ and Enter).

@@ -29,6 +29,8 @@ BUILD_MODE="${BAN_BUILD_MODE:-auto}"
 
 usage() {
     cat <<'HELP'
+Команды: ghostnet-ru build|run|test|check [параметры] [папка]
+
 GHOSTNET — сборка программ для Linux, Windows и macOS
 
 Запуск без параметров: меню со стрелками ↑/↓ и Enter.
