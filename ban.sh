@@ -1,0 +1,703 @@
+#!/usr/bin/env bash
+
+set -u
+shopt -s nullglob
+
+ACTION="${BAN_ACTION:-}"
+BUILD_TARGET="${BAN_BUILD_TARGET:-}"
+WIN_METHOD="${BAN_WIN_METHOD:-}"
+RUN_AFTER="${BAN_RUN_AFTER:-0}"
+RUN_CHOICE_SET="${BAN_RUN_AFTER+x}"
+RUN_FILE="${BAN_RUN_FILE:-}"
+SOURCE_FILE="${BAN_SOURCE_FILE:-}"
+TARGET_DIR_PRESET="${BAN_TARGET_DIR:-}"
+TARGET_DIR=""
+ASSUME_YES=0
+
+usage() {
+    cat <<'HELP'
+GHOSTNET — build helper for Linux and Windows
+
+Run without arguments for the arrow-key menu (↑/↓ and Enter).
+
+  --check            Check required tools
+  --install-deps     Install missing tools
+  --auto             Check tools and build automatically
+  --target TARGET    linux, windows or both
+  --run              Run the program after a successful build
+  --yes              Allow package installation without another confirmation
+  --no-animation     Disable animations
+  --help             Show help
+
+Example: bash ban.sh --auto --target linux --run ./project
+Without --yes, package installation requires confirmation in a terminal.
+HELP
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --check) ACTION="check" ;;
+        --install-deps) ACTION="install" ;;
+        --auto) ACTION="auto" ;;
+        --target)
+            if [[ $# -lt 2 ]]; then
+                printf '[ERROR] --target requires a platform.\n' >&2
+                exit 2
+            fi
+            BUILD_TARGET="$2"
+            shift
+            ;;
+        --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
+        --yes) ASSUME_YES=1 ;;
+        --no-animation) BAN_NO_ANIMATION=1 ;;
+        --help|-h) usage; exit 0 ;;
+        --)
+            shift
+            if [[ $# -eq 1 && -z "$TARGET_DIR" ]]; then
+                TARGET_DIR="$1"
+                shift
+                break
+            fi
+            printf '[ERROR] Specify exactly one project folder.\n' >&2
+            exit 2
+            ;;
+        -*) printf '[ERROR] Unknown option: %s\n' "$1" >&2; exit 2 ;;
+        *)
+            if [[ -n "$TARGET_DIR" ]]; then
+                printf '[ERROR] Specify exactly one project folder.\n' >&2
+                exit 2
+            fi
+            TARGET_DIR="$1"
+            ;;
+    esac
+    shift
+done
+
+ANIMATION_ENABLED=0
+if [[ "${BAN_NO_ANIMATION:-0}" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
+    ANIMATION_ENABLED=1
+    clear
+fi
+
+text="
+ ██████╗ ██╗  ██╗ ██████╗ ███████╗████████╗███╗   ██╗███████╗████████╗
+██╔════╝ ██║  ██║██╔═══██╗██╔════╝╚══██╔══╝████╗  ██║██╔════╝╚══██╔══╝
+██║  ███╗███████║██║   ██║███████╗   ██║   ██╔██╗ ██║█████╗     ██║   
+██║   ██║██╔══██║██║   ██║╚════██║   ██║   ██║╚██╗██║██╔══╝     ██║   
+╚██████╔╝██║  ██║╚██████╔╝███████║   ██║   ██║ ╚████║███████╗   ██║   
+ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝  ╚═══╝╚══════╝   ╚═╝   
+"
+
+BLUE="\033[38;2;0;180;255m"
+GREEN="\033[38;2;0;255;65m"
+PURPLE="\033[38;2;190;60;255m"
+YELLOW="\033[38;2;255;255;0m"
+RED="\033[38;2;255;60;60m"
+WHITE="\033[38;2;255;255;255m"
+RESET="\033[0m"
+
+if [[ "$ANIMATION_ENABLED" -eq 0 ]]; then
+    BLUE="" GREEN="" PURPLE="" YELLOW="" RED="" WHITE="" RESET=""
+fi
+
+lines=(
+"$BLUE  ███████████████████████████████████████████████████████████████████████$RESET"
+"$GREEN █           SYSTEM BOOTING          INITIALIZING CORE                █$RESET"
+"$PURPLE█           GHOST PROTOCOL        ctOS TERMINAL  v2.7.4              █$RESET"
+"$RED   ███████████████████████████████████████████████████████████████████████$RESET"
+)
+
+if [[ "$ANIMATION_ENABLED" -eq 1 ]]; then
+    # Loading effect
+    for i in {0..20}; do
+        printf "\r${GREEN}Loading: [%-20s] %d%%${RESET}" "$(printf "#%.0s" $(seq 1 "$i"))" $((i * 5))
+        sleep 0.05
+    done
+    sleep 0.25
+    clear
+
+    # Flicker effect
+    for i in {1..5}; do
+        echo -e "${RED}SYSTEM INITIALIZING...${RESET}"
+        clear
+        echo -e "${RED}$text${RESET}"
+        sleep 0.02
+        clear
+        sleep 0.01
+    done
+
+    # Static glitch effect
+    for i in {1..12}; do
+        clear
+        echo -e "${RED}SYSTEM INITIALIZING...${RESET}"
+        r=$((RANDOM % 4))
+        echo -e "${lines[$r]}"
+        echo
+        echo -e "${GREEN}$text${RESET}"
+        echo
+        echo -e "${lines[$r]}"
+        sleep 0.045
+    done
+
+    clear
+    echo -e "${GREEN}SYSTEM ONLINE${RESET}"
+    echo -e "${WHITE}███████████████████████████████████████████████████████████████████████${RESET}"
+    echo
+    echo -e "${WHITE}${text}${RESET}"
+    echo
+    echo -e "${WHITE}███████████████████████████████████████████████████████████████████████${RESET}"
+    echo
+
+else
+    printf 'GHOSTNET\n\n'
+fi
+
+LINUX_CXX="g++"
+WIN_CXX="x86_64-w64-mingw32-g++"
+CPP_FLAGS=(-O2 -std=c++17)
+WIN_FLAGS_METHOD1=(-static -static-libgcc -static-libstdc++ -s)
+# Fallback: more aggressive static link mode.
+WIN_FLAGS_METHOD2=(-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lgcc -lwinpthread -Wl,-Bdynamic -lws2_32 -s)
+
+BUILD_PID=""
+BUILD_LOG=""
+
+cleanup_terminal() {
+    if [[ -n "$BUILD_PID" ]]; then
+        kill "$BUILD_PID" 2>/dev/null || true
+        wait "$BUILD_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$BUILD_LOG" ]]; then
+        rm -f -- "$BUILD_LOG"
+    fi
+    if [[ -t 1 ]]; then
+        tput cnorm 2>/dev/null || true
+    fi
+}
+trap cleanup_terminal EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Bash 5 offers microsecond timestamps; older Bash falls back to whole seconds.
+build_time_ms() {
+    local stamp="${EPOCHREALTIME:-$SECONDS.000000}"
+    local fraction="${stamp#*.}"
+    printf '%s' "$(( ${stamp%.*} * 1000 + 10#${fraction:0:3} ))"
+}
+
+run_build() {
+    local label="$1"
+    shift
+    local started elapsed status frame=0
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    started=$(build_time_ms)
+
+    if [[ "$ANIMATION_ENABLED" -eq 1 ]]; then
+        BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/ban-build.XXXXXX") || return 1
+        tput civis 2>/dev/null || true
+        "$@" >"$BUILD_LOG" 2>&1 &
+        BUILD_PID=$!
+        while kill -0 "$BUILD_PID" 2>/dev/null; do
+            elapsed=$(( $(build_time_ms) - started ))
+            printf '\r\033[2K%b[%s] %s  BUILDING  %d.%ds%b' \
+                "$BLUE" "${frames[$frame]}" "$label" "$((elapsed / 1000))" "$((elapsed % 1000 / 100))" "$RESET"
+            frame=$(( (frame + 1) % ${#frames[@]} ))
+            sleep 0.1
+        done
+        status=0
+        wait "$BUILD_PID" || status=$?
+        BUILD_PID=""
+        printf '\r\033[2K'
+        tput cnorm 2>/dev/null || true
+    else
+        status=0
+        "$@" || status=$?
+    fi
+
+    elapsed=$(( $(build_time_ms) - started ))
+    if [[ "$status" -eq 0 ]]; then
+        printf '%b[✓] %s  COMPLETE  %d.%ds%b\n' "$GREEN" "$label" "$((elapsed / 1000))" "$((elapsed % 1000 / 100))" "$RESET"
+    else
+        printf '%b[✗] %s  FAILED  %d.%ds%b\n' "$RED" "$label" "$((elapsed / 1000))" "$((elapsed % 1000 / 100))" "$RESET"
+    fi
+    if [[ -n "$BUILD_LOG" ]]; then
+        cat -- "$BUILD_LOG"
+        rm -f -- "$BUILD_LOG"
+        BUILD_LOG=""
+    fi
+    return "$status"
+}
+
+choose_menu() {
+    local title="$1"
+    local default_index="$2"
+    shift 2
+    local options=("$@")
+    local selected="$default_index"
+    local count="${#options[@]}"
+    local i key extra
+
+    if [[ "$count" -eq 0 ]]; then
+        MENU_SELECTED=0
+        return
+    fi
+
+    # Fallback for non-interactive mode (no arrows available).
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        MENU_SELECTED="$selected"
+        return
+    fi
+
+    tput civis 2>/dev/null || true
+    printf "%s\n" "$title"
+
+    while true; do
+        for ((i = 0; i < count; i++)); do
+            if [[ "$i" -eq "$selected" ]]; then
+                printf "  ${GREEN}> %s${RESET}\n" "${options[$i]}"
+            else
+                printf "    %s\n" "${options[$i]}"
+            fi
+        done
+
+        IFS= read -rsn1 key || exit 1
+        if [[ "$key" == $'\x1b' ]]; then
+            IFS= read -rsn2 -t 0.2 extra || true
+            key+="$extra"
+        fi
+
+        case "$key" in
+            $'\x1b[A') selected=$(( (selected - 1 + count) % count )) ;;
+            $'\x1b[B') selected=$(( (selected + 1) % count )) ;;
+            "") break ;;
+        esac
+
+        printf "\033[%dA\r" "$count"
+    done
+
+    MENU_SELECTED="$selected"
+    tput cnorm 2>/dev/null || true
+    printf "\n"
+}
+
+if [[ -z "$ACTION" ]]; then
+    if [[ -t 0 && -t 1 && -z "$BUILD_TARGET" ]]; then
+        choose_menu "GHOSTNET — main menu (↑/↓ + Enter):" 2 \
+            "Check environment" \
+            "Install tools" \
+            "Build a program" \
+            "Full automatic build" \
+            "Exit"
+        case "$MENU_SELECTED" in
+            0) ACTION="check" ;;
+            1) ACTION="install" ;;
+            2) ACTION="build" ;;
+            3) ACTION="auto" ;;
+            4) exit 0 ;;
+        esac
+    else
+        ACTION="build"
+    fi
+fi
+
+case "$ACTION" in
+    check|install|build|auto) ;;
+    *) printf '[ERROR] Invalid mode: %s\n' "$ACTION" >&2; exit 2 ;;
+esac
+
+platform_menu=("Linux" "Windows" "Linux and Windows")
+if [[ -z "$BUILD_TARGET" ]]; then
+    choose_menu "Platform (↑/↓ + Enter):" 0 "${platform_menu[@]}"
+    case "$MENU_SELECTED" in
+        0) BUILD_TARGET="linux" ;;
+        1) BUILD_TARGET="windows" ;;
+        *) BUILD_TARGET="both" ;;
+    esac
+fi
+
+if [[ "$BUILD_TARGET" != "linux" && "$BUILD_TARGET" != "windows" && "$BUILD_TARGET" != "both" ]]; then
+    echo -e "${RED}[ERROR]${RESET} Invalid BAN_BUILD_TARGET: $BUILD_TARGET"
+    exit 1
+fi
+
+sources=()
+has_cpp=0
+has_py=0
+has_rs=0
+
+if [[ "$ACTION" == "build" || "$ACTION" == "auto" || -n "$TARGET_DIR" || -n "$TARGET_DIR_PRESET" || -n "$SOURCE_FILE" ]]; then
+    if [[ -z "$TARGET_DIR" ]]; then
+        if [[ -n "$TARGET_DIR_PRESET" ]]; then
+            TARGET_DIR="$TARGET_DIR_PRESET"
+        elif [[ ( "$ACTION" == "build" || "$ACTION" == "auto" ) && -t 0 ]]; then
+            read -r -p "Project folder (. by default): " TARGET_DIR || exit 1
+        fi
+    fi
+    TARGET_DIR="${TARGET_DIR:-.}"
+    [[ "$TARGET_DIR" == "/" ]] || TARGET_DIR="${TARGET_DIR%/}"
+    if [[ ! -d "$TARGET_DIR" ]]; then
+        printf '[ERROR] Folder not found: %s\n' "$TARGET_DIR" >&2
+        exit 1
+    fi
+    sources=("$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.py "$TARGET_DIR"/*.rs)
+    if [[ -n "$SOURCE_FILE" ]]; then
+        case "$SOURCE_FILE" in
+            *.cpp|*.py|*.rs)
+                if [[ -f "$SOURCE_FILE" ]]; then
+                    sources=("$SOURCE_FILE")
+                else
+                    printf '[ERROR] File not found: %s\n' "$SOURCE_FILE" >&2
+                    exit 1
+                fi
+                ;;
+            *) printf '[ERROR] Unsupported file: %s\n' "$SOURCE_FILE" >&2; exit 1 ;;
+        esac
+    fi
+    if [[ ${#sources[@]} -eq 0 ]]; then
+        printf '[ERROR] No supported source files in folder: %s\n' "$TARGET_DIR" >&2
+        exit 1
+    fi
+    for src in "${sources[@]}"; do
+        case "$src" in
+            *.cpp) has_cpp=1 ;;
+            *.py) has_py=1 ;;
+            *.rs) has_rs=1 ;;
+        esac
+    done
+else
+    # Environment actions without a project inspect the full supported toolset.
+    has_cpp=1 has_py=1 has_rs=1
+fi
+
+if [[ "$has_cpp" -eq 1 && ( "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ) ]]; then
+    if [[ -z "$WIN_METHOD" ]]; then
+        if [[ "$ACTION" == "auto" || "$ACTION" == "check" || "$ACTION" == "install" ]]; then
+            WIN_METHOD="auto"
+        else
+            choose_menu "Windows build method (↑/↓ + Enter):" 0 \
+                "Automatic (recommended)" \
+                "Static build" \
+                "Extended static build"
+            case "$MENU_SELECTED" in
+                0) WIN_METHOD="auto" ;;
+                1) WIN_METHOD="1" ;;
+                2) WIN_METHOD="2" ;;
+            esac
+        fi
+    fi
+else
+    WIN_METHOD="auto"
+fi
+
+if [[ "$WIN_METHOD" != "1" && "$WIN_METHOD" != "2" && "$WIN_METHOD" != "auto" ]]; then
+    echo -e "${RED}[ERROR]${RESET} Invalid BAN_WIN_METHOD: $WIN_METHOD"
+    exit 1
+fi
+
+required_compilers=()
+if [[ "$has_cpp" -eq 1 ]]; then
+    if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
+        required_compilers+=("$LINUX_CXX")
+    fi
+fi
+if [[ ( "$has_cpp" -eq 1 || "$has_rs" -eq 1 ) && ( "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ) ]]; then
+    required_compilers+=("$WIN_CXX")
+fi
+[[ "$has_py" -eq 0 ]] || required_compilers+=(python3)
+[[ "$has_rs" -eq 0 ]] || required_compilers+=(rustc)
+
+check_dependencies() {
+    local compiler missing=0
+    for compiler in "${required_compilers[@]}"; do
+        if command -v "$compiler" >/dev/null 2>&1; then
+            printf '%b[✓] %s — found%b\n' "$GREEN" "$compiler" "$RESET"
+        else
+            printf '%b[✗] %s — not found%b\n' "$RED" "$compiler" "$RESET"
+            missing=1
+        fi
+    done
+    return "$missing"
+}
+
+install_dependencies() {
+    local manager compiler package
+    local packages=() command_args=() privilege=()
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        printf '[ERROR] Tool installation is supported on Linux only.\n' >&2
+        return 1
+    fi
+    if command -v pacman >/dev/null 2>&1; then
+        manager="pacman"
+        command_args=(pacman -S --needed --noconfirm)
+    elif command -v apt-get >/dev/null 2>&1; then
+        manager="apt-get"
+        command_args=(apt-get install -y)
+    elif command -v dnf >/dev/null 2>&1; then
+        manager="dnf"
+        command_args=(dnf install -y)
+    else
+        printf '[ERROR] Supported package managers: apt-get, dnf and pacman. Install tools manually.\n' >&2
+        return 1
+    fi
+
+    for compiler in "${required_compilers[@]}"; do
+        command -v "$compiler" >/dev/null 2>&1 && continue
+        case "$manager:$compiler" in
+            apt-get:g++) package="g++" ;;
+            apt-get:x86_64-w64-mingw32-g++) package="g++-mingw-w64-x86-64" ;;
+            dnf:g++) package="gcc-c++" ;;
+            dnf:x86_64-w64-mingw32-g++) package="mingw64-gcc-c++" ;;
+            pacman:g++) package="gcc" ;;
+            pacman:x86_64-w64-mingw32-g++) package="mingw-w64-gcc" ;;
+            apt-get:python3|dnf:python3) package="python3" ;;
+            pacman:python3) package="python" ;;
+            apt-get:rustc) package="rustc" ;;
+            dnf:rustc) package="rust" ;;
+            pacman:rustc) package="rust" ;;
+        esac
+        packages+=("$package")
+    done
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        printf '[OK] All required tools are already installed.\n'
+        return 0
+    fi
+    if [[ "$EUID" -ne 0 ]]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            printf '[ERROR] Installation requires sudo or root.\n' >&2
+            return 1
+        fi
+        privilege=(sudo)
+    fi
+    printf 'Missing packages: %s\n' "${packages[*]}"
+    printf 'Install command:'
+    printf ' %q' "${privilege[@]}" "${command_args[@]}" "${packages[@]}"
+    printf '\n'
+    if [[ "$ASSUME_YES" -ne 1 ]]; then
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            printf '[ERROR] Installation requires terminal confirmation or --yes.\n' >&2
+            return 1
+        fi
+        choose_menu "Install these packages?" 0 "Cancel" "Install"
+        if [[ "$MENU_SELECTED" -ne 1 ]]; then
+            printf 'Installation cancelled.\n'
+            return 1
+        fi
+    fi
+    "${privilege[@]}" "${command_args[@]}" "${packages[@]}" || return 1
+    hash -r
+    check_dependencies
+}
+
+case "$ACTION" in
+    check) check_dependencies; exit $? ;;
+    install) install_dependencies; exit $? ;;
+    auto)
+        if ! check_dependencies; then
+            install_dependencies || exit 1
+        fi
+        ;;
+    build) check_dependencies || exit 1 ;;
+esac
+
+echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Project folder ->${RESET} $TARGET_DIR"
+echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Target platform ->${RESET} $BUILD_TARGET"
+
+if [[ -t 0 && -t 1 && -z "$RUN_CHOICE_SET" ]]; then
+    choose_menu "Run after building?" 0 "Build only" "Build and run"
+    RUN_AFTER="$MENU_SELECTED"
+fi
+
+# Only native sources that share a stem need distinct output filenames.
+output_base() {
+    local source="$1" other
+    local stem="${source%.*}"
+    for other in "${sources[@]}"; do
+        if [[ "$other" != "$source" && "$other" != *.py && "${other%.*}" == "$stem" ]]; then
+            printf '%s-%s' "$stem" "${source##*.}"
+            return
+        fi
+    done
+    printf '%s' "$stem"
+}
+
+# Plan all native outputs before compiling so no source or earlier result is overwritten.
+reserved_outputs=()
+output_bases=()
+base_is_available() {
+    local candidate="$1" path existing
+    local paths=()
+    if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
+        paths+=("$candidate")
+    fi
+    if [[ "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ]]; then
+        paths+=("${candidate}.exe")
+    fi
+    for path in "${paths[@]}"; do
+        for existing in "${sources[@]}" "${reserved_outputs[@]}"; do
+            if [[ "$path" == "$existing" || "$path" -ef "$existing" ]]; then
+                return 1
+            fi
+        done
+    done
+    return 0
+}
+
+for src in "${sources[@]}"; do
+    if [[ "$src" == *.py ]]; then
+        output_bases+=("")
+        continue
+    fi
+    base=$(output_base "$src")
+    suffix=0
+    while ! base_is_available "$base"; do
+        suffix=$((suffix + 1))
+        base="${src%.*}-${src##*.}-$suffix"
+    done
+    output_bases+=("$base")
+    if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
+        reserved_outputs+=("$base")
+    fi
+    if [[ "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ]]; then
+        reserved_outputs+=("${base}.exe")
+    fi
+done
+
+built_files=()
+built_kinds=()
+fail=0
+
+for ((source_index = 0; source_index < ${#sources[@]}; source_index++)); do
+    src="${sources[$source_index]}"
+    base="${output_bases[$source_index]}"
+    case "$src" in
+        *.py)
+            if run_build "$src" python3 -m py_compile "$src"; then
+                built_files+=("$src")
+                built_kinds+=(script)
+            else
+                fail=1
+            fi
+            continue
+            ;;
+        *.rs)
+            crate="${src##*/}"
+            crate="ghostnet_${crate%.*}"
+            crate="${crate//[^a-zA-Z0-9_]/_}"
+            if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
+                if run_build "Linux: $src" rustc --edition=2021 --crate-name "$crate" -O "$src" -o "$base"; then
+                    built_files+=("$base")
+                    built_kinds+=(native)
+                else
+                    fail=1
+                    continue
+                fi
+            fi
+            if [[ "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ]]; then
+                if run_build "Windows: $src" rustc --edition=2021 --crate-name "$crate" -O \
+                    --target x86_64-pc-windows-gnu -C "linker=$WIN_CXX" "$src" -o "${base}.exe"; then
+                    if [[ "$BUILD_TARGET" == "windows" ]]; then
+                        built_files+=("${base}.exe")
+                        built_kinds+=(windows)
+                    fi
+                else
+                    fail=1
+                fi
+            fi
+            continue
+            ;;
+    esac
+
+    if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
+        echo -e "${GREEN}[BUILD]${RESET} Linux: $src -> $base"
+        if ! run_build "Linux: $src" "$LINUX_CXX" "${CPP_FLAGS[@]}" "$src" -o "$base"; then
+            echo -e "${RED}[ERROR]${RESET} Failed to build Linux binary for $src"
+            fail=1
+            continue
+        fi
+        built_files+=("$base")
+        built_kinds+=(native)
+    fi
+
+    if [[ "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ]]; then
+        if [[ "$WIN_METHOD" == "1" ]]; then
+            echo -e "${GREEN}[BUILD]${RESET} Windows (method 1): $src -> ${base}.exe"
+            if ! run_build "Windows (method 1): $src" "$WIN_CXX" "${CPP_FLAGS[@]}" "$src" -o "${base}.exe" "${WIN_FLAGS_METHOD1[@]}"; then
+                echo -e "${RED}[ERROR]${RESET} Failed to build Windows binary for $src (method 1)."
+                fail=1
+            fi
+        elif [[ "$WIN_METHOD" == "2" ]]; then
+            echo -e "${GREEN}[BUILD]${RESET} Windows (method 2): $src -> ${base}.exe"
+            if ! run_build "Windows (method 2): $src" "$WIN_CXX" "${CPP_FLAGS[@]}" "$src" -o "${base}.exe" "${WIN_FLAGS_METHOD2[@]}"; then
+                echo -e "${RED}[ERROR]${RESET} Failed to build Windows binary for $src (method 2)."
+                fail=1
+            fi
+        else
+            echo -e "${GREEN}[BUILD]${RESET} Windows (method 1): $src -> ${base}.exe"
+            if ! run_build "Windows (method 1): $src" "$WIN_CXX" "${CPP_FLAGS[@]}" "$src" -o "${base}.exe" "${WIN_FLAGS_METHOD1[@]}"; then
+                echo -e "${YELLOW}[WARN]${RESET} Method 1 failed. Trying method 2 (full static fallback)..."
+                if ! run_build "Windows (method 2): $src" "$WIN_CXX" "${CPP_FLAGS[@]}" "$src" -o "${base}.exe" "${WIN_FLAGS_METHOD2[@]}"; then
+                    echo -e "${RED}[ERROR]${RESET} Failed to build Windows binary for $src (both methods)."
+                    fail=1
+                else
+                    echo -e "${GREEN}[OK]${RESET} Windows build completed using method 2."
+                fi
+            fi
+        fi
+        if [[ "$BUILD_TARGET" == "windows" && "$fail" -eq 0 ]]; then
+            built_files+=("${base}.exe")
+            built_kinds+=(windows)
+        fi
+    fi
+done
+
+if [[ "$fail" -ne 0 ]]; then
+    exit 1
+fi
+
+if [[ "$RUN_AFTER" == "1" ]]; then
+    run_index=-1
+    if [[ -n "$RUN_FILE" ]]; then
+        run_candidate="$RUN_FILE"
+        [[ "$run_candidate" == */* ]] || run_candidate="$TARGET_DIR/$run_candidate"
+        for ((i = 0; i < ${#built_files[@]}; i++)); do
+            if [[ "$run_candidate" -ef "${built_files[$i]}" || ( "${built_kinds[$i]}" == "windows" && "${run_candidate%.exe}.exe" -ef "${built_files[$i]}" ) ]]; then
+                run_index="$i"
+                break
+            fi
+        done
+        if [[ "$run_index" -lt 0 ]]; then
+            printf '[ERROR] Requested file is not among the build results: %s\n' "$RUN_FILE" >&2
+            exit 1
+        fi
+    elif [[ ${#built_files[@]} -eq 1 ]]; then
+        run_index=0
+    elif [[ ${#built_files[@]} -gt 1 && -t 0 && -t 1 ]]; then
+        choose_menu "Which program should run?" 0 "${built_files[@]}"
+        run_index="$MENU_SELECTED"
+    else
+        printf '[ERROR] Set BAN_RUN_FILE to run one of multiple programs.\n' >&2
+        exit 1
+    fi
+
+    run_target="${built_files[$run_index]}"
+    [[ "$run_target" == */* ]] || run_target="./$run_target"
+    printf '%b[RUN]%b Running -> %s\n' "$GREEN" "$RESET" "$run_target"
+    case "${built_kinds[$run_index]}" in
+        script) python3 "$run_target" ;;
+        windows)
+            if ! command -v wine >/dev/null 2>&1; then
+                printf '[ERROR] Running .exe files on Linux requires Wine.\n' >&2
+                exit 1
+            fi
+            wine "$run_target"
+            ;;
+        native) "$run_target" ;;
+    esac
+    run_status=$?
+    if [[ "$run_status" -ne 0 ]]; then
+        printf '[ERROR] Program exited with code %d.\n' "$run_status" >&2
+        exit "$run_status"
+    fi
+fi
+
+echo -e "${GREEN}[OK]${RESET} Done."
