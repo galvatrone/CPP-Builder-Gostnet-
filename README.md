@@ -6,7 +6,7 @@ A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-
 
 [English](README.md) · [Русский](README.ru.md) · [Download releases](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest)
 
-![GHOSTNET main menu](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-menu.png)
+![GHOSTNET main menu](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-menu.png)
 
 ## Download
 
@@ -222,9 +222,9 @@ The installer proposes the missing packages before installation. Linux system pa
 
 The previews capture actual GHOSTNET terminal output.
 
-![GHOSTNET building programs](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-build.png)
+![GHOSTNET building programs](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-build.png)
 
-![GHOSTNET completed build](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-complete.png)
+![GHOSTNET completed build](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-complete.png)
 
 ## Development
 

@@ -18,7 +18,6 @@ __pycache__/
 
 /downloads/
 
-/assets/
 
 # Preserve local exclusions
 /tests/test_data/

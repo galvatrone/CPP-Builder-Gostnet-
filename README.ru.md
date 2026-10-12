@@ -6,7 +6,7 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Скачать релиз](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest)
 
-![Главное меню GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-menu.png)
+![Главное меню GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-menu.png)
 
 ## Скачать
 
@@ -222,9 +222,9 @@ BAN_RUN_FILE=hello bash ban-ru.sh --auto --target native --run ./project
 
 Изображения созданы из настоящего терминального вывода GHOSTNET.
 
-![Сборка программ в GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-build.png)
+![Сборка программ в GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-build.png)
 
-![Завершённая сборка GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-complete.png)
+![Завершённая сборка GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-complete.png)
 
 ## Разработка
 
