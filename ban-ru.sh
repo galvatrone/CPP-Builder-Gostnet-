@@ -57,6 +57,7 @@ HELP
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        recent) ACTION="recent" ;;
         init) ACTION="init" ;;
         --type) [[ $# -ge 2 ]] || { printf '[ERROR] --type requires a value.\n' >&2; exit 2; }; INIT_TYPE="$2"; shift ;;
         inspect) ACTION="inspect"; TARGET_DIR_PRESET="${TARGET_DIR_PRESET:-.}" ;;
@@ -370,6 +371,85 @@ project_passport() {
 }
 
 
+
+state_folder() { printf '%s/ghostnet' "${XDG_STATE_HOME:-$HOME/.local/state}"; }
+record_recent() {
+    local path state temporary old count=0 paths=()
+    path=$(cd -- "$TARGET_DIR" 2>/dev/null && pwd) || return 0
+    [[ "$path" != *$'\n'* && "$path" != *$'\r'* ]] || return 0
+    state=$(state_folder)
+    [[ ! -L "$state" && ! -L "$state/recent-projects" ]] || return 0
+    (umask 077; mkdir -p -- "$state") 2>/dev/null || return 0
+    temporary=$(mktemp "$state/recent.XXXXXX" 2>/dev/null) || return 0
+    paths=("$path")
+    if [[ -f "$state/recent-projects" ]]; then
+        while IFS= read -r old; do
+            [[ -d "$old" && "$old" != "$path" && -n "$old" ]] || continue
+            paths+=("$old")
+            [[ ${#paths[@]} -lt 5 ]] || break
+        done < "$state/recent-projects"
+    fi
+    printf '%s\n' "${paths[@]}" > "$temporary" && mv -f -- "$temporary" "$state/recent-projects" 2>/dev/null || rm -f -- "$temporary" 2>/dev/null
+    return 0
+}
+recent_projects() {
+    local state path paths=()
+    state=$(state_folder)
+    if [[ -f "$state/recent-projects" && ! -L "$state/recent-projects" ]]; then
+        while IFS= read -r path; do [[ ! -d "$path" ]] || paths+=("$path"); done < "$state/recent-projects"
+    fi
+    if [[ ${#paths[@]} -eq 0 ]]; then
+        printf '[RECENT] %s\n' "$(ui 'No recent projects yet.' 'Недавних проектов пока нет.')"
+        exit 0
+    fi
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        printf '[RECENT]\n'; printf '  %s\n' "${paths[@]}"; exit 0
+    fi
+    choose_menu "$(ui 'Recent projects (↑/↓ + Enter):' 'Недавние проекты (↑/↓ + Enter):')" 0 "${paths[@]}"
+    TARGET_DIR="${paths[$MENU_SELECTED]}"; ACTION=build
+}
+remember_entry() {
+    local entry="$1" root="$TARGET_DIR/.ghostnet-build" temporary
+    [[ ! -L "$root" && ! -L "$root/run-entry" ]] || return 0
+    mkdir -p -- "$root" 2>/dev/null || return 0
+    temporary=$(mktemp "$root/entry.XXXXXX" 2>/dev/null) || return 0
+    printf '%s\n' "$entry" > "$temporary" && mv -f -- "$temporary" "$root/run-entry" 2>/dev/null || rm -f -- "$temporary" 2>/dev/null
+    return 0
+}
+select_project_entry() {
+    local root path relative magic cached='' candidates=() skip=()
+    case "$PROJECT_BUILDER" in
+        cmake) root="$TARGET_DIR/.ghostnet-build/$project_platform" ;;
+        zig) root="$TARGET_DIR/zig-out/bin" ;;
+        make) root="$TARGET_DIR"; skip=(-name .ghostnet-build -o) ;;
+        *) return 0 ;;
+    esac
+    [[ -d "$root" ]] || return 0
+    while IFS= read -r -d '' path; do
+        case "$path" in *.so|*.so.*|*.dylib|*.dll|*.o|*.a|*.class) continue ;; esac
+        magic=$(od -An -tx1 -N4 -- "$path" 2>/dev/null); magic="${magic//[[:space:]]/}"
+        case "$magic" in 7f454c46|4d5a*|cffaedfe|cefaedfe|feedfacf|feedface|cafebabe|bebafeca) ;; *) continue ;; esac
+        relative="${path#"$TARGET_DIR/"}"
+        candidates+=("$relative")
+    done < <(find "$root" \( "${skip[@]}" -name CMakeFiles -o -name .git -o -name node_modules -o -name .venv -o -name _deps \) -prune -o -type f \( -perm -u+x -o -name '*.exe' \) -print0)
+    if [[ -f "$TARGET_DIR/.ghostnet-build/run-entry" && ! -L "$TARGET_DIR/.ghostnet-build/run-entry" ]]; then
+        IFS= read -r cached < "$TARGET_DIR/.ghostnet-build/run-entry" || true
+        for path in "${candidates[@]}"; do
+            [[ "$cached" != "$path" ]] || { entry="$cached"; return 0; }
+        done
+    fi
+    if [[ ${#candidates[@]} -eq 1 ]]; then
+        entry="${candidates[0]}"
+    elif [[ ${#candidates[@]} -gt 1 ]]; then
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            printf '[ERROR] %s\n' "$(ui 'Multiple programs: use --run-file PATH or select one interactively.' 'Несколько программ: укажите --run-file PATH или выберите в интерактивном меню.')" >&2
+            printf '  %s\n' "${candidates[@]}" >&2; exit 1
+        fi
+        choose_menu "$(ui 'Which program should run?' 'Какую программу запустить?')" 0 "${candidates[@]}"
+        entry="${candidates[$MENU_SELECTED]}"
+    fi
+}
+
 feature_error() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 init_project() {
     local destination="${TARGET_DIR:-}" kind="$INIT_TYPE" files=() sdk framework=net8.0
@@ -456,7 +536,8 @@ if [[ -z "$ACTION" ]]; then
             "Выход" \
             "$(ui 'Inspect project' 'Паспорт проекта')" \
             "$(ui 'Supported languages' 'Поддерживаемые языки')" \
-            "$(ui 'Create project' 'Создать проект')"
+            "$(ui 'Create project' 'Создать проект')" \
+            "$(ui 'Recent projects' 'Недавние проекты')"
         case "$MENU_SELECTED" in
             0) ACTION="check" ;;
             1) ACTION="install" ;;
@@ -466,11 +547,14 @@ if [[ -z "$ACTION" ]]; then
             5) ACTION="inspect"; TARGET_DIR_PRESET="." ;;
             6) languages_list; exit 0 ;;
             7) ACTION="init" ;;
+            8) ACTION="recent" ;;
         esac
     else
         ACTION="build"
     fi
 fi
+
+if [[ "$ACTION" == recent ]]; then recent_projects; fi
 
 if [[ "$ACTION" == init ]]; then init_project; exit $?; fi
 
@@ -905,6 +989,7 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
         esac
         exit $?
     fi
+    [[ "$ACTION" == test ]] || record_recent
     if [[ "$RUN_AFTER" == "1" ]]; then
         entry="${RUN_FILE:-$PROJECT_RUN}"
         if [[ -z "$entry" && "$PROJECT_BUILDER" == "cargo" ]]; then
@@ -912,12 +997,14 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
             exit $?
         fi
         if [[ -z "$entry" && "$PROJECT_BUILDER" == "cpp" ]]; then entry="$project_binary"; fi
+        [[ -n "$entry" ]] || select_project_entry
         [[ -n "$entry" ]] || project_error "Укажите run= в ghostnet.conf или --run-file ПУТЬ для этого проекта."
         entry="${entry//\{target\}/$project_platform}"
         extension=""; [[ "$project_platform" != "windows" ]] || extension=".exe"
         entry="${entry//\{exe\}/$extension}"
         relative_project_path "$entry" || project_error "Неверный путь запуска: $entry"
         [[ -f "$TARGET_DIR/$entry" ]] || project_error "Файл запуска не найден: $entry"
+        remember_entry "$entry"
         printf '[RUN] Запуск -> %s\n' "$entry"
         case "$entry" in
             *.py) project_command "$PYTHON_BIN" "$entry" "${PROJECT_ARGS[@]}" ;;
@@ -1084,6 +1171,8 @@ done
 if [[ "$fail" -ne 0 ]]; then
     exit 1
 fi
+
+record_recent
 
 if [[ "$RUN_AFTER" == "1" ]]; then
     run_index=-1
