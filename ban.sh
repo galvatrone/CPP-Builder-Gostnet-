@@ -232,6 +232,25 @@ build_time_ms() {
     printf '%s' "$(( ${stamp%.*} * 1000 + 10#${fraction:0:3} ))"
 }
 
+
+diagnostic_tip() {
+    local label="$1" log="$2" line tip=''
+    [[ -f "$log" ]] || return 0
+    while IFS= read -r line; do
+        case "$line" in
+            *multiple\ definition*main*|*duplicate\ symbol*main*) tip="$(ui 'Several main() functions: these may be separate programs. Try --mode files.' 'Несколько функций main(): возможно, это отдельные программы. Попробуйте --mode files.')" ;;
+            *fatal\ error:*No\ such\ file*|*fatal\ error:*file\ not\ found*) tip="$(ui 'Check the header path and installed library. Describe external dependencies in CMake or Make.' 'Проверьте путь к заголовку и установленную библиотеку. Опишите внешние зависимости в CMake или Make.')" ;;
+            *IndentationError*|*TabError*) tip="$(ui 'Check Python indentation; use consistent spaces instead of mixing tabs and spaces.' 'Проверьте отступы Python; не смешивайте табуляцию и пробелы.')" ;;
+            *SyntaxError*) tip="$(ui 'Check the syntax at the reported file and line.' 'Проверьте синтаксис в указанном файле и строке.')" ;;
+            *Cannot\ find\ module*|*TS2307*) tip="$(ui 'Install the project dependencies with its package manager (npm install / npm ci for Node).' 'Установите зависимости средствами проекта (npm install / npm ci для Node).')" ;;
+            *ModuleNotFoundError*) tip="$(ui 'Activate the project virtual environment and install the required Python package there.' 'Активируйте виртуальное окружение проекта и установите нужный пакет Python в нём.')" ;;
+            *tsc:*not\ found*|*tsc:*is\ not\ recognized*) tip="$(ui 'Install TypeScript in this project: npm install --save-dev typescript.' 'Установите TypeScript в проект: npm install --save-dev typescript.')" ;;
+        esac
+    done < "$log"
+    [[ -z "$tip" ]] || printf '%b[HINT]%b %s\n' "$YELLOW" "$RESET" "$tip"
+    return 0
+}
+
 run_build() {
     local label="$1"
     shift
@@ -258,7 +277,13 @@ run_build() {
         tput cnorm 2>/dev/null || true
     else
         status=0
-        "$@" || status=$?
+        BUILD_LOG=$(mktemp "${TMPDIR:-/tmp}/ban-errors.XXXXXX" 2>/dev/null) || BUILD_LOG=""
+        if [[ -n "$BUILD_LOG" ]]; then
+            "$@" 2>"$BUILD_LOG" || status=$?
+            cat -- "$BUILD_LOG" >&2
+        else
+            "$@" || status=$?
+        fi
     fi
 
     elapsed=$(( $(build_time_ms) - started ))
@@ -268,7 +293,8 @@ run_build() {
         printf '%b[✗] %s  FAILED  %d.%ds%b\n' "$RED" "$label" "$((elapsed / 1000))" "$((elapsed % 1000 / 100))" "$RESET"
     fi
     if [[ -n "$BUILD_LOG" ]]; then
-        cat -- "$BUILD_LOG"
+        [[ "$ANIMATION_ENABLED" -eq 0 ]] || cat -- "$BUILD_LOG"
+        [[ "$status" -eq 0 ]] || diagnostic_tip "$label" "$BUILD_LOG"
         rm -f -- "$BUILD_LOG"
         BUILD_LOG=""
     fi
