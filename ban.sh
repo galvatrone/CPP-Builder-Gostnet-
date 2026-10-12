@@ -3,6 +3,18 @@
 set -u
 shopt -s nullglob
 
+HOST_SYSTEM=$(uname -s)
+case "$HOST_SYSTEM" in
+    Linux) HOST_KIND="linux"; HOST_LABEL="Linux" ;;
+    Darwin) HOST_KIND="macos"; HOST_LABEL="macOS" ;;
+    MINGW*|MSYS*) HOST_KIND="windows"; HOST_LABEL="Windows" ;;
+    *) printf '[ERROR] Unsupported system: %s\n' "$HOST_SYSTEM" >&2; exit 1 ;;
+esac
+if [[ "${BASH_VERSINFO[0]}" -lt 4 || ( "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -lt 4 ) ]]; then
+    printf '[ERROR] Bash 4.4 or newer is required. On macOS: brew install bash.\n' >&2
+    exit 1
+fi
+
 ACTION="${BAN_ACTION:-}"
 BUILD_TARGET="${BAN_BUILD_TARGET:-}"
 WIN_METHOD="${BAN_WIN_METHOD:-}"
@@ -16,14 +28,14 @@ ASSUME_YES=0
 
 usage() {
     cat <<'HELP'
-GHOSTNET — build helper for Linux and Windows
+GHOSTNET — build helper for Linux, Windows and macOS
 
 Run without arguments for the arrow-key menu (↑/↓ and Enter).
 
   --check            Check required tools
   --install-deps     Install missing tools
   --auto             Check tools and build automatically
-  --target TARGET    linux, windows or both
+  --target TARGET    native, linux, macos, windows or both
   --run              Run the program after a successful build
   --yes              Allow package installation without another confirmation
   --no-animation     Disable animations
@@ -154,6 +166,16 @@ fi
 
 LINUX_CXX="g++"
 WIN_CXX="x86_64-w64-mingw32-g++"
+PYTHON_BIN="python3"
+if [[ "$HOST_KIND" == "windows" ]]; then
+    WIN_CXX="g++"
+fi
+select_python() {
+    if [[ "$HOST_KIND" == "windows" ]] && ! command -v python3 >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
+        PYTHON_BIN="python"
+    fi
+}
+select_python
 CPP_FLAGS=(-O2 -std=c++17)
 WIN_FLAGS_METHOD1=(-static -static-libgcc -static-libstdc++ -s)
 # Fallback: more aggressive static link mode.
@@ -305,20 +327,42 @@ case "$ACTION" in
     *) printf '[ERROR] Invalid mode: %s\n' "$ACTION" >&2; exit 2 ;;
 esac
 
-platform_menu=("Linux" "Windows" "Linux and Windows")
-if [[ -z "$BUILD_TARGET" ]]; then
-    choose_menu "Platform (↑/↓ + Enter):" 0 "${platform_menu[@]}"
-    case "$MENU_SELECTED" in
-        0) BUILD_TARGET="linux" ;;
-        1) BUILD_TARGET="windows" ;;
-        *) BUILD_TARGET="both" ;;
-    esac
+if [[ -z "$BUILD_TARGET" || "$BUILD_TARGET" == "native" ]]; then
+    if [[ "$BUILD_TARGET" == "native" ]]; then
+        BUILD_TARGET="$HOST_KIND"
+    elif [[ "$HOST_KIND" == "windows" ]]; then
+        BUILD_TARGET="windows"
+    else
+        platform_menu=("$HOST_LABEL" "Windows" "$HOST_LABEL and Windows")
+        choose_menu "Platform (↑/↓ + Enter):" 0 "${platform_menu[@]}"
+        case "$MENU_SELECTED" in
+            0) BUILD_TARGET="$HOST_KIND" ;;
+            1) BUILD_TARGET="windows" ;;
+            *) BUILD_TARGET="both" ;;
+        esac
+    fi
 fi
-
-if [[ "$BUILD_TARGET" != "linux" && "$BUILD_TARGET" != "windows" && "$BUILD_TARGET" != "both" ]]; then
-    echo -e "${RED}[ERROR]${RESET} Invalid BAN_BUILD_TARGET: $BUILD_TARGET"
+if [[ "$HOST_KIND" == "windows" && "$BUILD_TARGET" != "windows" ]]; then
+    printf '[ERROR] Only Windows builds are available on Windows.\n' >&2
     exit 1
 fi
+if [[ "$HOST_KIND" != "linux" && "$BUILD_TARGET" == "linux" ]]; then
+    printf '[ERROR] Linux builds require Linux. Use --target native.\n' >&2
+    exit 1
+fi
+if [[ "$BUILD_TARGET" == "macos" ]]; then
+    if [[ "$HOST_KIND" != "macos" ]]; then
+        printf '[ERROR] macOS builds require macOS.\n' >&2
+        exit 1
+    fi
+    BUILD_TARGET="linux" # Internal native branch; labels use the actual host.
+fi
+if [[ "$BUILD_TARGET" != "linux" && "$BUILD_TARGET" != "windows" && "$BUILD_TARGET" != "both" ]]; then
+    printf '[ERROR] Invalid BAN_BUILD_TARGET: %s\n' "$BUILD_TARGET" >&2
+    exit 1
+fi
+DISPLAY_TARGET="$BUILD_TARGET"
+[[ "$HOST_KIND" != "macos" || "$BUILD_TARGET" != "linux" ]] || DISPLAY_TARGET="macos"
 
 sources=()
 has_cpp=0
@@ -403,12 +447,14 @@ fi
 if [[ ( "$has_cpp" -eq 1 || "$has_rs" -eq 1 ) && ( "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ) ]]; then
     required_compilers+=("$WIN_CXX")
 fi
-[[ "$has_py" -eq 0 ]] || required_compilers+=(python3)
+[[ "$has_py" -eq 0 ]] || required_compilers+=("$PYTHON_BIN")
 [[ "$has_rs" -eq 0 ]] || required_compilers+=(rustc)
 
 check_dependencies() {
     local compiler missing=0
+    select_python
     for compiler in "${required_compilers[@]}"; do
+        [[ "$compiler" != "python3" ]] || compiler="$PYTHON_BIN"
         if command -v "$compiler" >/dev/null 2>&1; then
             printf '%b[✓] %s — found%b\n' "$GREEN" "$compiler" "$RESET"
         else
@@ -422,11 +468,21 @@ check_dependencies() {
 install_dependencies() {
     local manager compiler package
     local packages=() command_args=() privilege=()
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        printf '[ERROR] Tool installation is supported on Linux only.\n' >&2
-        return 1
-    fi
-    if command -v pacman >/dev/null 2>&1; then
+    if [[ "$HOST_KIND" == "macos" ]]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            printf '[ERROR] Install Homebrew or the required tools manually.\n' >&2
+            return 1
+        fi
+        manager="brew"
+        command_args=(brew install)
+    elif [[ "$HOST_KIND" == "windows" ]]; then
+        if [[ "${MSYSTEM:-}" != "UCRT64" ]] || ! command -v pacman >/dev/null 2>&1; then
+            printf '[ERROR] Run the script in MSYS2 UCRT64.\n' >&2
+            return 1
+        fi
+        manager="msys2"
+        command_args=(pacman -S --needed --noconfirm)
+    elif command -v pacman >/dev/null 2>&1; then
         manager="pacman"
         command_args=(pacman -S --needed --noconfirm)
     elif command -v apt-get >/dev/null 2>&1; then
@@ -454,6 +510,14 @@ install_dependencies() {
             apt-get:rustc) package="rustc" ;;
             dnf:rustc) package="rust" ;;
             pacman:rustc) package="rust" ;;
+            brew:g++) package="gcc" ;;
+            brew:x86_64-w64-mingw32-g++) package="mingw-w64" ;;
+            brew:python3|brew:python) package="python" ;;
+            brew:rustc) package="rust" ;;
+            msys2:g++) package="mingw-w64-ucrt-x86_64-gcc" ;;
+            msys2:python3|msys2:python) package="mingw-w64-ucrt-x86_64-python" ;;
+            msys2:rustc) package="mingw-w64-ucrt-x86_64-rust" ;;
+            *) printf '[ERROR] No package mapping for tool: %s\n' "$compiler" >&2; return 1 ;;
         esac
         packages+=("$package")
     done
@@ -461,7 +525,7 @@ install_dependencies() {
         printf '[OK] All required tools are already installed.\n'
         return 0
     fi
-    if [[ "$EUID" -ne 0 ]]; then
+    if [[ "$HOST_KIND" == "linux" && "$EUID" -ne 0 ]]; then
         if ! command -v sudo >/dev/null 2>&1; then
             printf '[ERROR] Installation requires sudo or root.\n' >&2
             return 1
@@ -500,7 +564,7 @@ case "$ACTION" in
 esac
 
 echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Project folder ->${RESET} $TARGET_DIR"
-echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Target platform ->${RESET} $BUILD_TARGET"
+echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Target platform ->${RESET} $DISPLAY_TARGET"
 
 if [[ -t 0 && -t 1 && -z "$RUN_CHOICE_SET" ]]; then
     choose_menu "Run after building?" 0 "Build only" "Build and run"
@@ -571,7 +635,7 @@ for ((source_index = 0; source_index < ${#sources[@]}; source_index++)); do
     base="${output_bases[$source_index]}"
     case "$src" in
         *.py)
-            if run_build "$src" python3 -m py_compile "$src"; then
+            if run_build "$src" "$PYTHON_BIN" -m py_compile "$src"; then
                 built_files+=("$src")
                 built_kinds+=(script)
             else
@@ -584,7 +648,7 @@ for ((source_index = 0; source_index < ${#sources[@]}; source_index++)); do
             crate="ghostnet_${crate%.*}"
             crate="${crate//[^a-zA-Z0-9_]/_}"
             if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
-                if run_build "Linux: $src" rustc --edition=2021 --crate-name "$crate" -O "$src" -o "$base"; then
+                if run_build "$HOST_LABEL: $src" rustc --edition=2021 --crate-name "$crate" -O "$src" -o "$base"; then
                     built_files+=("$base")
                     built_kinds+=(native)
                 else
@@ -608,9 +672,9 @@ for ((source_index = 0; source_index < ${#sources[@]}; source_index++)); do
     esac
 
     if [[ "$BUILD_TARGET" == "linux" || "$BUILD_TARGET" == "both" ]]; then
-        echo -e "${GREEN}[BUILD]${RESET} Linux: $src -> $base"
-        if ! run_build "Linux: $src" "$LINUX_CXX" "${CPP_FLAGS[@]}" "$src" -o "$base"; then
-            echo -e "${RED}[ERROR]${RESET} Failed to build Linux binary for $src"
+        echo -e "${GREEN}[BUILD]${RESET} ${HOST_LABEL}: $src -> $base"
+        if ! run_build "$HOST_LABEL: $src" "$LINUX_CXX" "${CPP_FLAGS[@]}" "$src" -o "$base"; then
+            echo -e "${RED}[ERROR]${RESET} Failed to build ${HOST_LABEL} binary for $src"
             fail=1
             continue
         fi
@@ -683,13 +747,16 @@ if [[ "$RUN_AFTER" == "1" ]]; then
     [[ "$run_target" == */* ]] || run_target="./$run_target"
     printf '%b[RUN]%b Running -> %s\n' "$GREEN" "$RESET" "$run_target"
     case "${built_kinds[$run_index]}" in
-        script) python3 "$run_target" ;;
+        script) "$PYTHON_BIN" "$run_target" ;;
         windows)
-            if ! command -v wine >/dev/null 2>&1; then
+            if [[ "$HOST_KIND" == "windows" ]]; then
+                "$run_target"
+            elif ! command -v wine >/dev/null 2>&1; then
                 printf '[ERROR] Running .exe files on Linux requires Wine.\n' >&2
                 exit 1
+            else
+                wine "$run_target"
             fi
-            wine "$run_target"
             ;;
         native) "$run_target" ;;
     esac

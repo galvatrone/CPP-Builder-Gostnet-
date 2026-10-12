@@ -1,93 +1,159 @@
 # GHOSTNET
 
-Терминальный помощник для сборки небольших программ. Меню управляется стрелками ↑/↓ и Enter. Скрипт работает на Linux и собирает программы для Linux и Windows x86-64.
+**A terminal builder for standalone C++, Python and Rust programs.**
 
-## Запуск
+A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-key menu. Pick a project, check its tools, build, and optionally launch a result.
+
+[English](README.md) · [Русский](README.ru.md) · [Download releases](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest)
+
+![GHOSTNET main menu](assets/ghostnet-menu.png)
+
+## Download
+
+Download the archive for your host and extract it. Every archive includes the independent English `ban.sh` and Russian `ban-ru.sh` scripts; neither needs the other.
+
+| Host | Latest release |
+| --- | --- |
+| Linux | [ghostnet-linux.zip](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/ghostnet-linux.zip) |
+| Windows with MSYS2 | [ghostnet-windows.zip](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/ghostnet-windows.zip) |
+| macOS | [ghostnet-macos.zip](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/ghostnet-macos.zip) |
+| All platforms | [ghostnet-all-platforms.zip](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/ghostnet-all-platforms.zip) |
+
+Individual scripts: [ban.sh](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/ban.sh) · [ban-ru.sh](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/ban-ru.sh).
+
+The shell scripts are distributed through GitHub Releases. No npm or Python package installation is needed.
+
+### macOS Bash prerequisite
+
+macOS includes an older Bash. GHOSTNET requires **Bash 4.4 or newer**. Install Homebrew Bash first:
+
+```bash
+brew install bash
+```
+
+Use `ban.command` or `ban-ru.command`; these launchers select the newer Bash automatically. For a direct terminal launch, use `"$(brew --prefix bash)/bin/bash" ban.sh`.
+
+## Start
+
+**Linux:** open a terminal in the extracted folder and run:
 
 ```bash
 bash ban.sh
 ```
 
-Главное меню:
+**macOS:** open `ban.command`, or run `"$(brew --prefix bash)/bin/bash" ban.sh` in Terminal. Native builds produce macOS executables. Dependency installation uses an existing Homebrew installation. If Apple's command line tools are missing, install them with `xcode-select --install`.
 
-- Проверить окружение.
-- Установить инструменты.
-- Собрать программу.
-- Полная автосборка.
-- Выход.
+**Windows:** install [MSYS2](https://www.msys2.org/), then open `ban.cmd`. The launcher uses the MSYS2 **UCRT64** environment, looking in `C:\msys64` by default. For another installation path, set `MSYS2_ROOT` to that folder. You can also run `bash ban.sh` from the MSYS2 UCRT64 terminal. PowerShell and Command Prompt alone do not provide the required Bash/compiler environment.
 
-Выберите платформу, укажите папку с `.cpp` и выберите, нужно ли запускать результат. Автосборка определяет исходники, проверяет необходимые инструменты, при необходимости предлагает их установку и автоматически выбирает запасной способ линковки Windows. По умолчанию выбрана платформа Linux.
+For the Russian interface, use `ban-ru.sh`, `ban-ru.command` or `ban-ru.cmd`. There is no language-selection menu.
 
-## Поддерживаемые языки
+Use **↑ / ↓** to move and **Enter** to select. The main menu offers dependency checking, installation, building, and an automatic check-and-build flow. Choose a project folder and the platform, then decide whether to launch a result. Animations turn off automatically outside an interactive terminal; `--no-animation` disables them explicitly.
 
-Язык определяется по расширению файла, без дополнительного меню:
+## What it builds
 
-| Исходник | Действие | Результат |
+GHOSTNET scans the selected folder's immediate `.cpp`, `.py` and `.rs` files. Each file is processed independently; subfolders are not scanned.
+
+| Source | Action | Result |
 | --- | --- | --- |
-| C++ `.cpp` | `g++`, C++17 / MinGW | Linux-бинарник и/или Windows `.exe` |
-| Python `.py` | `python3 -m py_compile`; по выбору запуск через `python3` | Проверка синтаксиса и байткод в `__pycache__/` |
-| Rust `.rs` | `rustc`, edition 2021 | Linux-бинарник и/или Windows `.exe` |
+| `.cpp` | Compile with C++17 | Native executable and/or Windows `.exe` |
+| `.py` | Validate with `python3 -m py_compile` | Python bytecode cache; launch the original script with `python3` only when requested |
+| `.rs` | Compile with `rustc --edition=2021` | Native executable and/or Windows `.exe` |
 
-Каждый исходник — отдельная программа; папка может содержать несколько языков. Для совпадающих имён C++ и Rust используются разные результаты: `hello-cpp` и `hello-rs`, чтобы один не затёр другой. Обычные результаты находятся рядом с исходниками. При дополнительных совпадениях имён добавляется числовой суффикс; исходники и результаты других программ не перезаписываются.
+Native executables are written beside their sources, usually using the source filename without its extension. Windows results use `.exe`. Sources with a shared filename stem receive distinct output names, and output planning avoids overwriting source files. The build output shows the actual filenames.
 
-Python проверяется одинаково во всех режимах платформы: этот режим не создаёт самостоятельный `.exe`, не запускает код до выбора запуска и требует интерпретатор для выполнения. Импорты и внешние пакеты проверяются уже при запуске, а не проверкой синтаксиса. [Документация py_compile](https://docs.python.org/3/library/py_compile.html).
+This is for standalone files. Multi-source linking, Cargo projects, external libraries and Python dependency management require a separate project build system. Python validation checks syntax; it does not bundle an executable or install imported modules.
 
-Для Rust под Windows нужны MinGW и стандартная библиотека `x86_64-pc-windows-gnu`. При использовании rustup установите её заранее:
+## Host and target support
+
+`--target native` selects the current host's native platform.
+
+| Host | Accepted targets | Meaning of `both` |
+| --- | --- | --- |
+| Linux | `native`, `linux`, `windows`, `both` | Linux + Windows |
+| macOS | `native`, `macos`, `windows`, `both` | macOS + Windows |
+| Windows / MSYS2 UCRT64 | `native`, `windows` | Unavailable |
+
+Windows cross-compilation on Linux/macOS uses MinGW-w64. macOS does not provide Linux cross-compilation, and Windows does not provide Linux or macOS builds. A native Windows `.exe` runs directly; launching a cross-built `.exe` on Linux/macOS requires Wine, installed separately.
+
+Rust Windows cross-builds also need the target standard library. With a rustup-managed toolchain, install it explicitly:
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
 ```
 
-Скрипт не устанавливает rustup и целевую стандартную библиотеку автоматически. На системном `rustc` настройка зависит от дистрибутива. [Кросс-компиляция Rust](https://rust-lang.github.io/rustup/cross-compilation.html).
+GHOSTNET does not install Rust target standard libraries automatically. A distribution's `rustc` package may not include this cross-target support.
 
-Проекты Cargo, связанные C++ исходники и сторонние библиотеки пока не поддерживаются.
-
-Сборка показывает вращающийся индикатор, время и результат. Диагностика компилятора в режиме анимации выводится после завершения сборки. При перенаправлении вывода эффекты отключаются автоматически.
-
-## Зависимости
-
-| Пакетный менеджер | C++ Linux | MinGW | Python | Rust |
-| --- | --- | --- | --- | --- |
-| apt-get | `g++` | `g++-mingw-w64-x86-64` | `python3` | `rustc` |
-| dnf | `gcc-c++` | `mingw64-gcc-c++` | `python3` | `rust` |
-| pacman | `gcc` | `mingw-w64-gcc` | `python` | `rust` |
-
-При сборке проверяются только инструменты для найденных исходников и выбранной платформы. Проверка/установка без папки проекта охватывает все поддерживаемые инструменты. Устанавливаются только недостающие пакеты. Перед установкой показаны пакеты и команда; подтверждение выбирается стрелками. Может потребоваться пароль `sudo`. Для других систем установите инструменты вручную.
-
-Названия пакетов: [Debian](https://packages.debian.org/search?keywords=g%2B%2B-mingw-w64-x86-64), [Fedora](https://packages.fedoraproject.org/pkgs/mingw-gcc/mingw64-gcc-c%2B%2B/), [Arch Linux](https://archlinux.org/packages/extra/x86_64/mingw-w64-gcc/). Пакеты Rust: [Fedora](https://packages.fedoraproject.org/pkgs/rust/rust/), [Arch Linux](https://archlinux.org/packages/extra/x86_64/rust/).
-
-Для запуска Windows `.exe` из Linux нужен Wine, который скрипт автоматически не устанавливает. Исходный код должен быть совместим с целевой платформой. Наличие `.exe` или Linux-бинарника не гарантирует работу на любой версии ОС или архитектуре.
-
-## Автоматизация
-
-Команды необязательны — все основные действия доступны в меню.
+## Command-line use
 
 ```bash
-bash ban.sh --check --target both
-bash ban.sh --install-deps --target both
+# Check only the tools needed by this folder and target
+bash ban.sh --check --target native ./project
+
+# Check the environment and build for this host
+bash ban.sh --auto --target native ./project
+
+# Build and run (a single result is selected automatically)
+bash ban.sh --auto --target native --run ./project
+
+# Linux/macOS: build native and Windows results
 bash ban.sh --auto --target both ./project
-bash ban.sh --auto --target linux --run ./project
-bash ban.sh --help
+
+# Install missing tools with explicit approval
+bash ban.sh --install-deps --target native --yes ./project
 ```
 
-Для разрешённой заранее установки в неинтерактивном режиме добавьте `--yes`. Без него установка пакетов в таком режиме прекращается с ошибкой.
+| Option | Purpose |
+| --- | --- |
+| `--check` | Check required tools without building |
+| `--install-deps` | Install missing tools |
+| `--auto` | Check tools, offer installation if needed, then build |
+| `--target TARGET` | Select a supported target from the host table |
+| `--run` | Launch one successful result after building |
+| `--yes` | Approve dependency installation without an additional prompt |
+| `--no-animation` | Disable terminal animations |
+| `--help` | Show usage |
 
-Отключить анимации:
+Quote paths containing spaces. Use `--` before a project path beginning with `-`. Without `--yes`, package installation requires terminal confirmation. Unattended runs should provide an explicit action, target and project folder.
+
+Advanced environment settings:
+
+| Variable | Purpose |
+| --- | --- |
+| `BAN_SOURCE_FILE` | Process one `.cpp`, `.py` or `.rs` file instead of scanning a folder |
+| `BAN_TARGET_DIR` | Default project folder |
+| `BAN_RUN_FILE` | Select a particular result for `--run` |
+| `BAN_WIN_METHOD` | Windows C++ strategy: `auto`, `1` or `2` |
+| `BAN_NO_ANIMATION=1` | Disable animations |
 
 ```bash
-bash ban.sh --no-animation
+BAN_SOURCE_FILE=./project/main.py bash ban.sh --auto --target native --run ./project
+BAN_RUN_FILE=hello bash ban.sh --auto --target native --run ./project
 ```
 
-Весь инструмент находится в `ban.sh`. Сохранены переменные `BAN_BUILD_TARGET`, `BAN_WIN_METHOD`, `BAN_TARGET_DIR`, `BAN_SOURCE_FILE`, `BAN_RUN_AFTER`, `BAN_RUN_FILE`, `BAN_NO_ANIMATION`. Новая `BAN_ACTION`: `check`, `install`, `build`, `auto`. Заданный `BAN_BUILD_TARGET` пропускает главное меню для совместимости с прежними командами.
+With several results, interactive runs offer a selection menu. Noninteractive runs require `BAN_RUN_FILE`. Python source paths are valid run selections after successful validation. A failed build or launched program returns a nonzero exit status.
 
-Если включён запуск и собрано несколько программ, в терминале появится меню выбора. Для автоматического запуска укажите `BAN_RUN_FILE`. Ошибка компиляции или запуска возвращает ненулевой код; пустая папка тоже считается ошибкой.
+## Tools and installation
 
-## Проверка
+Checks and installation follow the detected sources and chosen target: C++ needs its compiler, Python needs `python3`, and Rust needs `rustc`. Windows cross-builds also need the MinGW linker. A check or installation without a project inspects the complete supported toolset.
 
-Нужны Python 3, Bash, `g++`, MinGW и `rustc`:
+| Host | Package manager |
+| --- | --- |
+| Debian / Ubuntu | `apt-get` |
+| Fedora | `dnf` |
+| Arch Linux | `pacman` |
+| macOS | Homebrew (`brew`) |
+| Windows / MSYS2 UCRT64 | MSYS2 `pacman` with UCRT64 packages |
 
-```bash
-python -m unittest discover -s tests -v
-```
+The installer proposes the missing packages before installation. Linux system package installation may require `sudo`. Install Homebrew or MSYS2 yourself before using their dependency flows.
 
-Тесты проверяют настоящую сборку C++ для Linux/Windows и Rust для Linux, проверку/запуск Python, меню через псевдотерминал и установщик с подставными пакетными менеджерами. Сборка Rust для Windows не проверена на этой машине: целевая стандартная библиотека отсутствует. Системные пакеты при тестировании не устанавливаются.
+## Terminal preview
+
+The previews capture actual GHOSTNET terminal output.
+
+![GHOSTNET building programs](assets/ghostnet-build.png)
+
+![GHOSTNET completed build](assets/ghostnet-complete.png)
+
+## Development
+
+The scripts remain standalone Bash entry points. CI is configured to validate the supported Linux, macOS and Windows/MSYS2 hosts. Host-specific behavior still needs verification on the corresponding operating system; a Linux test run alone does not establish macOS or Windows compatibility.
