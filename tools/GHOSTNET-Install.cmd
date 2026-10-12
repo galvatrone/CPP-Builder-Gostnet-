@@ -60,6 +60,15 @@ function Download-File([string]$Url,[string]$Destination) {
     & curl.exe --fail --location --silent --show-error --retry 3 --proto '=https' --tlsv1.2 --output $Destination $Url
     if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
 }
+function Get-LatestVersion {
+    # GitHub's public release redirect avoids anonymous API rate limits.
+    $Url=& curl.exe --fail --location --silent --show-error --retry 3 --proto '=https' --tlsv1.2 --head --output NUL --write-out '%{url_effective}' "https://github.com/$Repository/releases/latest"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the latest release.' }
+    $Uri=[uri]($Url -join '')
+    $Pattern='^/'+[regex]::Escape($Repository)+'/releases/tag/(v\d+\.\d+\.\d+)/?$'
+    if ($Uri.Scheme -ne 'https' -or $Uri.Host -ne 'github.com' -or $Uri.AbsolutePath -notmatch $Pattern) { throw 'Invalid stable release redirect.' }
+    return $Matches[1]
+}
 function Check-Checksum([string]$File,[string]$Checksums,[string]$Name) {
     $MatchesFound=@(Get-Content -LiteralPath $Checksums | Where-Object { $_ -match ('^[0-9a-fA-F]{64}\s+\*?'+[regex]::Escape($Name)+'\s*$') })
     if ($MatchesFound.Count -ne 1) { throw "Missing or ambiguous SHA-256 entry: $Name" }
@@ -181,8 +190,7 @@ try {
     $Root=[IO.Path]::GetFullPath($env:GHOSTNET_APP_DIR)
     $Version=$env:GHOSTNET_VERSION
     if ($env:GHOSTNET_UPDATE -eq '1') {
-        $Release=Invoke-RestMethod -Uri "https://api.github.com/repos/$Repository/releases/latest" -Headers @{'User-Agent'='GHOSTNET-Installer'}
-        $Version=$Release.tag_name
+        $Version=Get-LatestVersion
     }
     if ($Version -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid stable release version.' }
     Write-Host "GHOSTNET INSTALLER - $Version"

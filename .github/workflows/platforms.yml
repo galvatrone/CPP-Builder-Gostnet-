@@ -202,9 +202,11 @@ jobs:
         \ 'CMD bridge failed'\n    } finally { Pop-Location }\n    & $Installer --yes --no-launch --version v1.1.0 --dir $App\
         \ --msys2-root $env:MSYS2_ROOT\n    Assert ($LASTEXITCODE -eq 0) 'Reinstall failed'\n    Assert ([Environment]::GetEnvironmentVariable('Path','User')\
         \ -eq $UserPath) 'Reinstall duplicated PATH'\n    # Update is a real request for the latest stable release, never\
-        \ main.\n    & $Command update --yes --no-launch\n    Assert ($LASTEXITCODE -eq 0) 'Release updater failed'\n    &\
-        \ $Command --help | Out-Null\n    Assert ($LASTEXITCODE -eq 0) 'Updated command failed'\n    Write-Host 'PASS: single-file\
-        \ install, native cmd/PowerShell commands, cwd, PATH and update'\n} finally {\n    [Environment]::SetEnvironmentVariable('Path',$OriginalPath,'User')\n\
+        \ main.\n    # Exercise the current updater rather than the historical installer copied from v1.1.0.\n    Copy-Item\
+        \ -LiteralPath $Installer -Destination (Join-Path $App 'GHOSTNET-Install.cmd') -Force\n    & $Command update --yes\
+        \ --no-launch\n    Assert ($LASTEXITCODE -eq 0) 'Release updater failed'\n    & $Command --help | Out-Null\n    Assert\
+        \ ($LASTEXITCODE -eq 0) 'Updated command failed'\n    Write-Host 'PASS: single-file install, native cmd/PowerShell\
+        \ commands, cwd, PATH and update'\n} finally {\n    [Environment]::SetEnvironmentVariable('Path',$OriginalPath,'User')\n\
         \    Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue\n}\n"
 'on':
   push: null
