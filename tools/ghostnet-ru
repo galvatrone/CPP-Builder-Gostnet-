@@ -13,6 +13,8 @@ fi
 export PATH="$(dirname -- "$selected_bash"):$PATH"
 if [[ -f "$root/ban-ru.sh" ]]; then
     exec "$selected_bash" "$root/ban-ru.sh" "$@"
+elif [[ -f "$root/../ban-ru.sh" ]]; then
+    exec "$selected_bash" "$root/../ban-ru.sh" "$@"
 else
     exec "$selected_bash" "$root/../share/ghostnet/ban-ru.sh" "$@"
 fi

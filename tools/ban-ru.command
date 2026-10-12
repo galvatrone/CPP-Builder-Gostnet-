@@ -1,5 +1,5 @@
 #!/bin/bash
-# Works next to the release scripts or inside the repository launchers directory.
+# Works next to the release scripts or inside the repository tools directory.
 launcher_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
 script="$launcher_dir/ban-ru.sh"
 [[ -f "$script" ]] || script="$launcher_dir/../ban-ru.sh"

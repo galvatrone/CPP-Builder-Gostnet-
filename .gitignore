@@ -3,8 +3,16 @@ __pycache__/
 .ghostnet-build/
 .venv/
 
-# Local release packaging helpers
-/tools/
+# Auxiliary runtime files are public; development helpers stay local
+/tools/*
+!/tools/ghostnet
+!/tools/ghostnet-ru
+!/tools/install.sh
+!/tools/GHOSTNET-Install.cmd
+!/tools/ban.cmd
+!/tools/ban-ru.cmd
+!/tools/ban.command
+!/tools/ban-ru.command
 
 /tests/
 

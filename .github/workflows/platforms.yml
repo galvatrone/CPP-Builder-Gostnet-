@@ -47,13 +47,13 @@ jobs:
         n' > \"$fixture/helper.cc\"\nprintf '#include \"helper.h\"\\n#include <iostream>\\nint main(){std::cout<<\"GHOSTNET_OK=\"\
         <<answer();}\\n' > \"$fixture/main.cpp\"\nfor script in ban.sh ban-ru.sh; do\n    bash -n \"$script\"\n    output=$(BAN_NO_ANIMATION=1\
         \ bash \"$script\" run --mode project --target native \"$fixture\")\n    [[ \"$output\" == *GHOSTNET_OK=42* ]]\ndone\n\
-        prefix=\"$fixture/installed\"\nbash install.sh --prefix \"$prefix\"\n\"$prefix/bin/ghostnet\" --version\n\"$prefix/bin/ghostnet-ru\"\
-        \ --help\n"
+        prefix=\"$fixture/installed\"\nbash tools/install.sh --prefix \"$prefix\"\n\"$prefix/bin/ghostnet\" --version\n\"\
+        $prefix/bin/ghostnet-ru\" --help\n"
     - name: macOS launchers
       if: runner.os == 'macOS'
-      run: 'bash ban.command --help
+      run: 'bash tools/ban.command --help
 
-        bash ban-ru.command --help
+        bash tools/ban-ru.command --help
 
         '
   windows:
@@ -86,15 +86,15 @@ jobs:
         n' > \"$fixture/helper.cc\"\nprintf '#include \"helper.h\"\\n#include <iostream>\\nint main(){std::cout<<\"GHOSTNET_OK=\"\
         <<answer();}\\n' > \"$fixture/main.cpp\"\nfor script in ban.sh ban-ru.sh; do\n    bash -n \"$script\"\n    output=$(BAN_NO_ANIMATION=1\
         \ bash \"$script\" run --mode project --target native \"$fixture\")\n    [[ \"$output\" == *GHOSTNET_OK=42* ]]\ndone\n\
-        prefix=\"$fixture/installed\"\nbash install.sh --prefix \"$prefix\"\n\"$prefix/bin/ghostnet\" --version\n\"$prefix/bin/ghostnet-ru\"\
-        \ --help\n"
+        prefix=\"$fixture/installed\"\nbash tools/install.sh --prefix \"$prefix\"\n\"$prefix/bin/ghostnet\" --version\n\"\
+        $prefix/bin/ghostnet-ru\" --help\n"
     - name: Windows launchers
       shell: msys2 {0}
       run: 'export MSYS2_ROOT="$(cygpath -w /)"
 
-        cmd.exe //c ban.cmd --help
+        cmd.exe //c tools\\ban.cmd --help
 
-        cmd.exe //c ban-ru.cmd --help
+        cmd.exe //c tools\\ban-ru.cmd --help
 
         '
   native-installer:
@@ -108,7 +108,7 @@ jobs:
         persist-credentials: false
     - name: Verify checksums and staged update behavior
       shell: powershell
-      run: "$ErrorActionPreference = 'Stop'\n$Installer = Join-Path (Get-Location) 'GHOSTNET-Install.cmd'\nif (!(Test-Path\
+      run: "$ErrorActionPreference = 'Stop'\n$Installer = Join-Path (Get-Location) 'tools/GHOSTNET-Install.cmd'\nif (!(Test-Path\
         \ -LiteralPath $Installer)) { throw 'GHOSTNET-Install.cmd is missing' }\n$Text = Get-Content -LiteralPath $Installer\
         \ -Raw\n$Body = ($Text -split '(?m)^# GHOSTNET POWERSHELL START\\r?$',2)[1]\n$Tokens=$null; $Errors=$null\n$Ast=[System.Management.Automation.Language.Parser]::ParseInput($Body,[ref]$Tokens,[ref]$Errors)\n\
         if ($Errors.Count) { throw ($Errors | Out-String) }\n$Ast.FindAll({param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)\
@@ -141,7 +141,7 @@ jobs:
         \ $Fixture -Recurse -Force }\n"
     - name: Install with fresh MSYS2 and exercise commands
       shell: powershell
-      run: "$ErrorActionPreference = 'Stop'\n$Repo = (Get-Location).Path\n$Installer = Join-Path $Repo 'GHOSTNET-Install.cmd'\n\
+      run: "$ErrorActionPreference = 'Stop'\n$Repo = (Get-Location).Path\n$Installer = Join-Path $Repo 'tools/GHOSTNET-Install.cmd'\n\
         if (!(Test-Path -LiteralPath $Installer)) { throw 'GHOSTNET-Install.cmd is missing' }\n$TestRoot = Join-Path $env:TEMP\
         \ ('ghostnet native test ' + [guid]::NewGuid())\n$App = Join-Path $TestRoot 'installed application'\n$OriginalPath\
         \ = [Environment]::GetEnvironmentVariable('Path','User')\nNew-Item -ItemType Directory -Path $TestRoot | Out-Null\n\

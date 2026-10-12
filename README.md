@@ -51,19 +51,21 @@ For the Russian interface, use `ban-ru.sh`, `ban-ru.command` or `ban-ru.cmd`. Th
 
 Use **↑ / ↓** to move and **Enter** to select. The main menu offers dependency checking, installation, building, and an automatic check-and-build flow. Choose a project folder and the platform, then decide whether to launch a result. Animations turn off automatically outside an interactive terminal; `--no-animation` disables them explicitly.
 
+Repository launchers and installers live in `tools/`; in release ZIPs they sit next to `ban.sh`. Documentation images stay in `assets/` and are excluded from ZIPs.
+
 ## Install the `ghostnet` command
 
-From the extracted archive or cloned repository:
+From a cloned repository (in an extracted ZIP, use `bash install.sh` instead):
 
 ```bash
-bash install.sh
+bash tools/install.sh
 export PATH="$HOME/.local/bin:$PATH"
 ghostnet
 ```
 
-Add the PATH line to your shell configuration to keep it across sessions. This installs copies of both standalone scripts under `~/.local/share/ghostnet`, and `ghostnet` / `ghostnet-ru` under `~/.local/bin`; the original download folder is no longer required. A custom location is supported: `bash install.sh --prefix /your/path`. On Windows run installation and commands inside MSYS2 UCRT64. On macOS install Homebrew Bash first; the command selects it automatically.
+Add the PATH line to your shell configuration to keep it across sessions. This installs copies of both standalone scripts under `~/.local/share/ghostnet`, and `ghostnet` / `ghostnet-ru` under `~/.local/bin`; the original download folder is no longer required. A custom location is supported: `bash tools/install.sh --prefix /your/path`. On Windows run installation and commands inside MSYS2 UCRT64. On macOS install Homebrew Bash first; the command selects it automatically.
 
-You can also run `./ghostnet` directly from the repository. `bash ban.sh` and `bash ban-ru.sh` remain supported and independent.
+You can also run `./tools/ghostnet` directly from the repository. `bash ban.sh` and `bash ban-ru.sh` remain supported and independent.
 
 ## Project detection and commands
 
