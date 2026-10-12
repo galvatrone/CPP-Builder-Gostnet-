@@ -25,6 +25,7 @@ SOURCE_FILE="${BAN_SOURCE_FILE:-}"
 TARGET_DIR_PRESET="${BAN_TARGET_DIR:-}"
 TARGET_DIR=""
 ASSUME_YES=0
+BUILD_MODE="${BAN_BUILD_MODE:-auto}"
 
 usage() {
     cat <<'HELP'
@@ -36,9 +37,12 @@ Run without arguments for the arrow-key menu (↑/↓ and Enter).
   --install-deps     Install missing tools
   --auto             Check tools and build automatically
   --target TARGET    native, linux, macos, windows or both
+  --mode MODE        auto, files, project, cmake, make, cargo or python
+  --run-file PATH    Project entry point (relative to project folder)
   --run              Run the program after a successful build
   --yes              Allow package installation without another confirmation
   --no-animation     Disable animations
+  --version          GHOSTNET 1.1.0
   --help             Show help
 
 Example: bash ban.sh --auto --target linux --run ./project
@@ -48,6 +52,10 @@ HELP
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        build) ACTION="build" ;;
+        run) ACTION="auto"; RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
+        test) ACTION="test" ;;
+        check) ACTION="check"; TARGET_DIR_PRESET="${TARGET_DIR_PRESET:-.}" ;;
         --check) ACTION="check" ;;
         --install-deps) ACTION="install" ;;
         --auto) ACTION="auto" ;;
@@ -59,9 +67,14 @@ while [[ $# -gt 0 ]]; do
             BUILD_TARGET="$2"
             shift
             ;;
+        --mode|--run-file)
+            [[ $# -ge 2 ]] || { printf '[ERROR] %s requires a value.\n' "$1" >&2; exit 2; }
+            if [[ "$1" == "--mode" ]]; then BUILD_MODE="$2"; else RUN_FILE="$2"; fi
+            shift ;;
         --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         --yes) ASSUME_YES=1 ;;
         --no-animation) BAN_NO_ANIMATION=1 ;;
+        --version) printf 'GHOSTNET 1.1.0\n'; exit 0 ;;
         --help|-h) usage; exit 0 ;;
         --)
             shift
@@ -84,6 +97,8 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+case "$BUILD_MODE" in auto|files|project|cmake|make|cargo|python) ;; *) printf '[ERROR] Invalid build mode: %s\n' "$BUILD_MODE" >&2; exit 2 ;; esac
 
 ANIMATION_ENABLED=0
 if [[ "${BAN_NO_ANIMATION:-0}" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
@@ -323,7 +338,7 @@ if [[ -z "$ACTION" ]]; then
 fi
 
 case "$ACTION" in
-    check|install|build|auto) ;;
+    check|install|build|auto|test) ;;
     *) printf '[ERROR] Invalid mode: %s\n' "$ACTION" >&2; exit 2 ;;
 esac
 
@@ -369,11 +384,11 @@ has_cpp=0
 has_py=0
 has_rs=0
 
-if [[ "$ACTION" == "build" || "$ACTION" == "auto" || -n "$TARGET_DIR" || -n "$TARGET_DIR_PRESET" || -n "$SOURCE_FILE" ]]; then
+if [[ "$ACTION" == "build" || "$ACTION" == "auto" || "$ACTION" == "test" || -n "$TARGET_DIR" || -n "$TARGET_DIR_PRESET" || -n "$SOURCE_FILE" ]]; then
     if [[ -z "$TARGET_DIR" ]]; then
         if [[ -n "$TARGET_DIR_PRESET" ]]; then
             TARGET_DIR="$TARGET_DIR_PRESET"
-        elif [[ ( "$ACTION" == "build" || "$ACTION" == "auto" ) && -t 0 ]]; then
+        elif [[ ( "$ACTION" == "build" || "$ACTION" == "auto" || "$ACTION" == "test" ) && -t 0 ]]; then
             read -r -p "Project folder (. by default): " TARGET_DIR || exit 1
         fi
     fi
@@ -383,10 +398,10 @@ if [[ "$ACTION" == "build" || "$ACTION" == "auto" || -n "$TARGET_DIR" || -n "$TA
         printf '[ERROR] Folder not found: %s\n' "$TARGET_DIR" >&2
         exit 1
     fi
-    sources=("$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.py "$TARGET_DIR"/*.rs)
+    sources=("$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.cc "$TARGET_DIR"/*.cxx "$TARGET_DIR"/*.py "$TARGET_DIR"/*.rs)
     if [[ -n "$SOURCE_FILE" ]]; then
         case "$SOURCE_FILE" in
-            *.cpp|*.py|*.rs)
+            *.cpp|*.cc|*.cxx|*.py|*.rs)
                 if [[ -f "$SOURCE_FILE" ]]; then
                     sources=("$SOURCE_FILE")
                 else
@@ -397,13 +412,9 @@ if [[ "$ACTION" == "build" || "$ACTION" == "auto" || -n "$TARGET_DIR" || -n "$TA
             *) printf '[ERROR] Unsupported file: %s\n' "$SOURCE_FILE" >&2; exit 1 ;;
         esac
     fi
-    if [[ ${#sources[@]} -eq 0 ]]; then
-        printf '[ERROR] No supported source files in folder: %s\n' "$TARGET_DIR" >&2
-        exit 1
-    fi
     for src in "${sources[@]}"; do
         case "$src" in
-            *.cpp) has_cpp=1 ;;
+            *.cpp|*.cc|*.cxx) has_cpp=1 ;;
             *.py) has_py=1 ;;
             *.rs) has_rs=1 ;;
         esac
@@ -411,6 +422,109 @@ if [[ "$ACTION" == "build" || "$ACTION" == "auto" || -n "$TARGET_DIR" || -n "$TA
 else
     # Environment actions without a project inspect the full supported toolset.
     has_cpp=1 has_py=1 has_rs=1
+fi
+
+# Literal project configuration: values are never evaluated as shell code.
+project_error() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+relative_project_path() {
+    [[ -n "$1" && "$1" != /* && "$1" != *\\* && "/$1/" != */../* ]]
+}
+PROJECT_BUILDER=""
+PROJECT_OUTPUT="program"
+PROJECT_RUN=""
+PROJECT_SOURCES=() PROJECT_INCLUDES=() PROJECT_ARGS=()
+if [[ "$BUILD_MODE" != "files" ]]; then
+    if [[ -f "$TARGET_DIR/ghostnet.conf" ]]; then
+        while IFS= read -r config_line || [[ -n "$config_line" ]]; do
+            config_line="${config_line%$'\r'}"
+            [[ -n "$config_line" && "$config_line" != \#* ]] || continue
+            [[ "$config_line" == *=* ]] || project_error "Invalid ghostnet.conf line: $config_line"
+            key="${config_line%%=*}" value="${config_line#*=}"
+            case "$key" in
+                builder) PROJECT_BUILDER="$value" ;;
+                source) relative_project_path "$value" || project_error "Invalid source path: $value"; PROJECT_SOURCES+=("$value") ;;
+                include) relative_project_path "$value" || project_error "Invalid include path: $value"; PROJECT_INCLUDES+=("$value") ;;
+                output) [[ "$value" =~ ^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$ ]] || project_error "Invalid output name: $value"; PROJECT_OUTPUT="$value" ;;
+                run) relative_project_path "$value" || project_error "Invalid run path: $value"; PROJECT_RUN="$value" ;;
+                arg) PROJECT_ARGS+=("$value") ;;
+                *) project_error "Unknown ghostnet.conf key: $key" ;;
+            esac
+        done < "$TARGET_DIR/ghostnet.conf"
+        PROJECT_BUILDER="${PROJECT_BUILDER:-cpp}"
+    elif [[ -f "$TARGET_DIR/CMakeLists.txt" ]]; then
+        PROJECT_BUILDER="cmake"
+    elif [[ -f "$TARGET_DIR/Cargo.toml" ]]; then
+        PROJECT_BUILDER="cargo"
+    elif [[ -f "$TARGET_DIR/pyproject.toml" ]]; then
+        PROJECT_BUILDER="python"
+    elif [[ -f "$TARGET_DIR/GNUmakefile" || -f "$TARGET_DIR/Makefile" || -f "$TARGET_DIR/makefile" ]]; then
+        PROJECT_BUILDER="make"
+    fi
+    case "$BUILD_MODE" in
+        cmake|make|cargo|python) PROJECT_BUILDER="$BUILD_MODE" ;;
+        project) PROJECT_BUILDER="${PROJECT_BUILDER:-cpp}" ;;
+        auto)
+            if [[ -z "$PROJECT_BUILDER" && ( "$ACTION" == "build" || "$ACTION" == "auto" || "$ACTION" == "test" ) && -t 0 && -t 1 ]]; then
+                choose_menu "Build mode (↑/↓ + Enter):" 0 "Separate programs" "One project (related C++ files)"
+                [[ "$MENU_SELECTED" -eq 0 ]] || PROJECT_BUILDER="cpp"
+            fi
+            ;;
+    esac
+fi
+if [[ -n "$PROJECT_BUILDER" ]]; then
+    case "$PROJECT_BUILDER" in cpp|cmake|make|cargo|python|none) ;; *) project_error "Invalid project builder: $PROJECT_BUILDER" ;; esac
+    [[ -z "$SOURCE_FILE" ]] || project_error "BAN_SOURCE_FILE requires --mode files."
+    if [[ "$PROJECT_BUILDER" == "cmake" || "$PROJECT_BUILDER" == "make" || "$PROJECT_BUILDER" == "cargo" || "$PROJECT_BUILDER" == "python" ]]; then
+        if [[ "$BUILD_TARGET" == "both" || ( "$BUILD_TARGET" == "windows" && "$HOST_KIND" != "windows" ) ]]; then
+            project_error "This project builder supports --target native only."
+        fi
+    fi
+    if [[ "$PROJECT_BUILDER" == "cmake" ]]; then
+        [[ -f "$TARGET_DIR/CMakeLists.txt" ]] || project_error "CMakeLists.txt not found."
+    elif [[ "$PROJECT_BUILDER" == "make" ]]; then
+        [[ -f "$TARGET_DIR/GNUmakefile" || -f "$TARGET_DIR/Makefile" || -f "$TARGET_DIR/makefile" ]] || project_error "Makefile not found."
+    elif [[ "$PROJECT_BUILDER" == "cargo" ]]; then
+        [[ -f "$TARGET_DIR/Cargo.toml" ]] || project_error "Cargo.toml not found."
+    elif [[ "$PROJECT_BUILDER" == "python" ]]; then
+        [[ -f "$TARGET_DIR/pyproject.toml" ]] || project_error "pyproject.toml not found."
+        if [[ -z "$PROJECT_RUN" && -f "$TARGET_DIR/__main__.py" ]]; then PROJECT_RUN="__main__.py"; fi
+    elif [[ "$PROJECT_BUILDER" == "cpp" ]]; then
+        if [[ ${#PROJECT_SOURCES[@]} -eq 0 ]]; then
+            for src in "$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.cc "$TARGET_DIR"/*.cxx; do
+                PROJECT_SOURCES+=("${src##*/}")
+            done
+        fi
+        [[ ${#PROJECT_SOURCES[@]} -gt 0 ]] || project_error "No C++ sources for the project."
+        for src in "${PROJECT_SOURCES[@]}"; do
+            case "$src" in *.cpp|*.cc|*.cxx) ;; *) project_error "Unsupported C++ source: $src" ;; esac
+            [[ -f "$TARGET_DIR/$src" ]] || project_error "Source not found: $src"
+        done
+        for include in "${PROJECT_INCLUDES[@]}"; do
+            [[ -d "$TARGET_DIR/$include" ]] || project_error "Include folder not found: $include"
+        done
+    fi
+    # The project build tools own source discovery; Python checks remain explicit.
+    sources=("$TARGET_DIR"/*.py)
+    entry="${RUN_FILE:-$PROJECT_RUN}"
+    if [[ "$entry" == *.py && -f "$TARGET_DIR/$entry" ]]; then
+        sources+=("$TARGET_DIR/$entry")
+    fi
+    has_cpp=0 has_rs=0 has_py=0
+    case "$PROJECT_BUILDER" in cpp) has_cpp=1 ;; esac
+    [[ "$PROJECT_BUILDER" != "python" ]] || has_py=1
+    if [[ -x "$TARGET_DIR/.venv/bin/python" ]]; then
+        PYTHON_BIN=$(cd -- "$TARGET_DIR" && pwd)/.venv/bin/python
+    elif [[ -x "$TARGET_DIR/.venv/Scripts/python.exe" ]]; then
+        PYTHON_BIN=$(cd -- "$TARGET_DIR" && pwd)/.venv/Scripts/python.exe
+    fi
+    [[ ${#sources[@]} -eq 0 ]] || has_py=1
+fi
+
+if [[ -z "$PROJECT_BUILDER" && ( "$ACTION" == "build" || "$ACTION" == "auto" ) ]]; then
+    if [[ ${#sources[@]} -eq 0 ]]; then
+        printf '[ERROR] No supported source files in folder: %s\n' "$TARGET_DIR" >&2
+        exit 1
+    fi
 fi
 
 if [[ "$has_cpp" -eq 1 && ( "$BUILD_TARGET" == "windows" || "$BUILD_TARGET" == "both" ) ]]; then
@@ -450,9 +564,14 @@ fi
 [[ "$has_py" -eq 0 ]] || required_compilers+=("$PYTHON_BIN")
 [[ "$has_rs" -eq 0 ]] || required_compilers+=(rustc)
 
+if [[ "$PROJECT_BUILDER" == "cmake" ]]; then required_compilers+=(cmake ninja); fi
+if [[ "$PROJECT_BUILDER" == "make" ]]; then required_compilers+=(make); fi
+if [[ "$PROJECT_BUILDER" == "cargo" ]]; then required_compilers+=(cargo rustc); fi
+if [[ "$ACTION" == "test" && -z "$PROJECT_BUILDER" ]]; then project_error "Testing requires a CMake, Make, Cargo or Python project."; fi
+
 check_dependencies() {
     local compiler missing=0
-    select_python
+    [[ ! -x "$PYTHON_BIN" ]] && select_python
     for compiler in "${required_compilers[@]}"; do
         [[ "$compiler" != "python3" ]] || compiler="$PYTHON_BIN"
         if command -v "$compiler" >/dev/null 2>&1; then
@@ -517,6 +636,15 @@ install_dependencies() {
             msys2:g++) package="mingw-w64-ucrt-x86_64-gcc" ;;
             msys2:python3|msys2:python) package="mingw-w64-ucrt-x86_64-python" ;;
             msys2:rustc) package="mingw-w64-ucrt-x86_64-rust" ;;
+            apt-get:cmake|dnf:cmake|pacman:cmake|brew:cmake) package="cmake" ;;
+            apt-get:ninja|dnf:ninja) package="ninja-build" ;;
+            pacman:ninja|brew:ninja) package="ninja" ;;
+            apt-get:make|dnf:make|pacman:make|brew:make|msys2:make) package="make" ;;
+            msys2:cmake) package="mingw-w64-ucrt-x86_64-cmake" ;;
+            msys2:ninja) package="mingw-w64-ucrt-x86_64-ninja" ;;
+            apt-get:cargo|dnf:cargo) package="cargo" ;;
+            pacman:cargo|brew:cargo) package="rust" ;;
+            msys2:cargo) package="mingw-w64-ucrt-x86_64-rust" ;;
             *) printf '[ERROR] No package mapping for tool: %s\n' "$compiler" >&2; return 1 ;;
         esac
         packages+=("$package")
@@ -560,15 +688,112 @@ case "$ACTION" in
             install_dependencies || exit 1
         fi
         ;;
-    build) check_dependencies || exit 1 ;;
+    build|test) check_dependencies || exit 1 ;;
 esac
 
 echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Project folder ->${RESET} $TARGET_DIR"
 echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Target platform ->${RESET} $DISPLAY_TARGET"
 
-if [[ -t 0 && -t 1 && -z "$RUN_CHOICE_SET" ]]; then
+if [[ "$ACTION" != "test" && -t 0 && -t 1 && -z "$RUN_CHOICE_SET" ]]; then
     choose_menu "Run after building?" 0 "Build only" "Build and run"
     RUN_AFTER="$MENU_SELECTED"
+fi
+
+# Project builds keep related files together and run from the project directory.
+if [[ -n "$PROJECT_BUILDER" ]]; then
+    TARGET_DIR=$(cd -- "$TARGET_DIR" && pwd) || exit 1
+    printf '[BUILD] Project builder -> %s\n' "$PROJECT_BUILDER"
+    project_platform="$DISPLAY_TARGET"
+    [[ "$BUILD_TARGET" != "both" ]] || project_platform="$HOST_KIND"
+    project_binary=".ghostnet-build/$project_platform/$PROJECT_OUTPUT"
+    [[ "$project_platform" != "windows" ]] || project_binary+=".exe"
+    project_command() { (cd -- "$TARGET_DIR" && "$@"); }
+    # Never traverse a user-provided symlink for generated output.
+    [[ ! -L "$TARGET_DIR/.ghostnet-build" ]] || project_error ".ghostnet-build must not be a symlink."
+    platforms=("$project_platform")
+    [[ "$BUILD_TARGET" != "both" ]] || platforms+=(windows)
+    if [[ "$PROJECT_BUILDER" == "cpp" || "$PROJECT_BUILDER" == "cmake" ]]; then
+        for platform in "${platforms[@]}"; do
+            build_dir=".ghostnet-build/$platform"
+            [[ ! -L "$TARGET_DIR/$build_dir" ]] || project_error "Build folder must not be a symlink: $build_dir"
+            mkdir -p -- "$TARGET_DIR/$build_dir" || exit 1
+            if [[ "$PROJECT_BUILDER" == "cpp" ]]; then
+                binary="$build_dir/$PROJECT_OUTPUT"
+                compiler="$LINUX_CXX"
+                [[ "$platform" != "windows" ]] || { binary+=".exe"; compiler="$WIN_CXX"; }
+                [[ ! -L "$TARGET_DIR/$binary" ]] || project_error "Output must not be a symlink: $binary"
+                for source_path in "${PROJECT_SOURCES[@]}"; do
+                    [[ ! "$TARGET_DIR/$binary" -ef "$TARGET_DIR/$source_path" ]] || project_error "Output would overwrite a source: $source_path"
+                done
+                include_flags=()
+                for include in "${PROJECT_INCLUDES[@]}"; do include_flags+=(-I "$include"); done
+                if [[ "$platform" == "windows" ]]; then
+                    if [[ "$WIN_METHOD" == "2" ]]; then
+                        run_build "$platform project" project_command "$compiler" "${CPP_FLAGS[@]}" "${include_flags[@]}" "${PROJECT_SOURCES[@]}" -o "$binary" "${WIN_FLAGS_METHOD2[@]}" || exit 1
+                    elif ! run_build "$platform project" project_command "$compiler" "${CPP_FLAGS[@]}" "${include_flags[@]}" "${PROJECT_SOURCES[@]}" -o "$binary" "${WIN_FLAGS_METHOD1[@]}"; then
+                        [[ "$WIN_METHOD" == "auto" ]] || exit 1
+                        run_build "$platform project (fallback)" project_command "$compiler" "${CPP_FLAGS[@]}" "${include_flags[@]}" "${PROJECT_SOURCES[@]}" -o "$binary" "${WIN_FLAGS_METHOD2[@]}" || exit 1
+                    fi
+                else
+                    run_build "$platform project" project_command "$compiler" "${CPP_FLAGS[@]}" "${include_flags[@]}" "${PROJECT_SOURCES[@]}" -o "$binary" || exit 1
+                fi
+            else
+                run_build "CMake configure" project_command cmake -S . -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release || exit 1
+                run_build "CMake build" project_command cmake --build "$build_dir" --config Release || exit 1
+            fi
+        done
+    elif [[ "$PROJECT_BUILDER" == "make" ]]; then
+        run_build "Make project" project_command make || exit 1
+    fi
+    if [[ "$PROJECT_BUILDER" == "cargo" ]]; then
+        run_build "Cargo build" project_command cargo build || exit 1
+    fi
+    for src in "${sources[@]}"; do
+        run_build "$src" "$PYTHON_BIN" -m py_compile "$src" || exit 1
+    done
+    if [[ "$ACTION" == "test" ]]; then
+        case "$PROJECT_BUILDER" in
+            cmake) run_build "CMake tests" project_command ctest --test-dir ".ghostnet-build/$project_platform" --output-on-failure ;;
+            make) run_build "Make tests" project_command make test ;;
+            cargo) run_build "Cargo tests" project_command cargo test ;;
+            python|none)
+                [[ -d "$TARGET_DIR/tests" ]] || project_error "Python tests folder not found."
+                run_build "Python tests" project_command "$PYTHON_BIN" -m unittest discover -s tests -v ;;
+            *) project_error "Define project tests with CMake, Make, Cargo or Python." ;;
+        esac
+        exit $?
+    fi
+    if [[ "$RUN_AFTER" == "1" ]]; then
+        entry="${RUN_FILE:-$PROJECT_RUN}"
+        if [[ -z "$entry" && "$PROJECT_BUILDER" == "cargo" ]]; then
+            project_command cargo run -- "${PROJECT_ARGS[@]}"
+            exit $?
+        fi
+        if [[ -z "$entry" && "$PROJECT_BUILDER" == "cpp" ]]; then entry="$project_binary"; fi
+        [[ -n "$entry" ]] || project_error "Set run= in ghostnet.conf or --run-file PATH for this project."
+        entry="${entry//\{target\}/$project_platform}"
+        extension=""; [[ "$project_platform" != "windows" ]] || extension=".exe"
+        entry="${entry//\{exe\}/$extension}"
+        relative_project_path "$entry" || project_error "Invalid run path: $entry"
+        [[ -f "$TARGET_DIR/$entry" ]] || project_error "Run file not found: $entry"
+        printf '[RUN] Running -> %s\n' "$entry"
+        case "$entry" in
+            *.py) project_command "$PYTHON_BIN" "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.exe)
+                if [[ "$HOST_KIND" == "windows" || "$project_platform" != "windows" ]]; then
+                    project_command "./$entry" "${PROJECT_ARGS[@]}"
+                elif command -v wine >/dev/null 2>&1; then
+                    project_command wine "$entry" "${PROJECT_ARGS[@]}"
+                else
+                    project_error "Running Windows executables requires Wine."
+                fi ;;
+            *) project_command "./$entry" "${PROJECT_ARGS[@]}" ;;
+        esac
+        run_status=$?
+        [[ "$run_status" -eq 0 ]] || { printf '[ERROR] Program exited with code %d.\n' "$run_status" >&2; exit "$run_status"; }
+    fi
+    printf '[OK] Done.\n'
+    exit 0
 fi
 
 # Only native sources that share a stem need distinct output filenames.

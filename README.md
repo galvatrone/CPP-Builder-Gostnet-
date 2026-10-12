@@ -1,8 +1,8 @@
 # GHOSTNET
 
-**A terminal builder for standalone C++, Python and Rust programs.**
+**A terminal build launcher for C++, Rust and Python projects.**
 
-A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-key menu. Pick a project, check its tools, build, and optionally launch a result.
+A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-key menu. Detect a project, check its tools, build, run and test through its existing build system.
 
 [English](README.md) · [Русский](README.ru.md) · [Download releases](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest)
 
@@ -49,9 +49,85 @@ For the Russian interface, use `ban-ru.sh`, `ban-ru.command` or `ban-ru.cmd`. Th
 
 Use **↑ / ↓** to move and **Enter** to select. The main menu offers dependency checking, installation, building, and an automatic check-and-build flow. Choose a project folder and the platform, then decide whether to launch a result. Animations turn off automatically outside an interactive terminal; `--no-animation` disables them explicitly.
 
+## Install the `ghostnet` command
+
+From the extracted archive or cloned repository:
+
+```bash
+bash install.sh
+export PATH="$HOME/.local/bin:$PATH"
+ghostnet
+```
+
+Add the PATH line to your shell configuration to keep it across sessions. This installs copies of both standalone scripts under `~/.local/share/ghostnet`, and `ghostnet` / `ghostnet-ru` under `~/.local/bin`; the original download folder is no longer required. A custom location is supported: `bash install.sh --prefix /your/path`. On Windows run installation and commands inside MSYS2 UCRT64. On macOS install Homebrew Bash first; the command selects it automatically.
+
+You can also run `./ghostnet` directly from the repository. `bash ban.sh` and `bash ban-ru.sh` remain supported and independent.
+
+## Project detection and commands
+
+```bash
+ghostnet build ./project
+ghostnet run ./project
+ghostnet test ./project
+ghostnet check ./project
+```
+
+Auto detection uses this order:
+
+| Project descriptor | Build / Run / Test |
+| --- | --- |
+| `ghostnet.conf` | Explicit builder and entry point |
+| `CMakeLists.txt` | CMake + Ninja / explicit entry / CTest |
+| `Cargo.toml` | Cargo build / run / test |
+| `pyproject.toml` | Python syntax checks / explicit entry / unittest in `tests/` |
+| `GNUmakefile`, `Makefile`, `makefile` | Make default target / explicit entry / `make test` |
+| No descriptor | Independent source files; interactive users can choose one C++ project |
+
+For one related C++ program without a build file:
+
+```bash
+ghostnet run --mode project ./project
+```
+
+All immediate `.cpp`, `.cc`, `.cxx` files are linked together. Headers are included by the sources, not compiled separately. Outputs go to `.ghostnet-build/<platform>/program`. Multiple `main()` functions mean these are separate programs: use `--mode files` instead.
+
+CMake, Make, Cargo and Python project modes currently support **native builds only**. Standalone files and the direct C++ project builder retain Windows cross-build support. `--mode cmake|make|cargo|python` forces a builder; `--mode files` overrides project detection.
+
+CMake and Make may produce multiple executables, so GHOSTNET requires the intended one:
+
+```bash
+ghostnet run --run-file '.ghostnet-build/{target}/app{exe}' ./cmake-project
+```
+
+`{target}` becomes `linux`, `macos` or `windows`; `{exe}` becomes `.exe` on Windows and is empty elsewhere. Cargo honors its own default binary / `default-run` configuration. Python requires `--run-file app.py`, `run=` in the configuration, or a root `__main__.py`. Existing `.venv/bin/python` or `.venv/Scripts/python.exe` is used automatically. Python dependencies and packaging remain managed by the project; `pyproject.toml` detection does not run pip. Python checks cover root scripts and the selected Python entry; tests use standard `unittest`, not an inferred pytest setup.
+
+## Related C++ / Python example
+
+Run the included [mixed project](examples/mixed-project/ghostnet.conf):
+
+```bash
+ghostnet run ./examples/mixed-project
+```
+
+It builds two C++ sources with headers from `include/`, then starts Python, which calls the built C++ program. All project entry points run with the project folder as their working directory.
+
+`ghostnet.conf` is a literal text file, one `key=value` per line:
+
+```ini
+builder=cpp
+source=src/main.cpp
+source=src/answer.cpp
+include=include
+output=worker
+run=launcher.py
+arg=Hello from GHOSTNET
+```
+
+Supported builders: `cpp`, `cmake`, `make`, `cargo`, `python`, `none`. Repeat `source`, `include` and `arg` as needed. Sources are exact relative paths; nested folders are supported by listing files. `output` is an executable basename under the generated build folder. `run` is a relative entry path. `builder=none` skips compilation for a Python/application launcher. Values may contain spaces; do not wrap them in quotes. There is no variable expansion or shell evaluation. Lines starting with `#` are comments. Third-party C++ libraries should be described by CMake/Make instead of this small configuration.
+
 ## What it builds
 
-GHOSTNET scans the selected folder's immediate `.cpp`, `.py` and `.rs` files. Each file is processed independently; subfolders are not scanned.
+In `--mode files`, GHOSTNET builds each immediate `.cpp`, `.cc`, `.cxx`, `.py` and `.rs` file independently. Subfolders are not scanned in this mode.
 
 | Source | Action | Result |
 | --- | --- | --- |
@@ -61,7 +137,7 @@ GHOSTNET scans the selected folder's immediate `.cpp`, `.py` and `.rs` files. Ea
 
 Native executables are written beside their sources, usually using the source filename without its extension. Windows results use `.exe`. Sources with a shared filename stem receive distinct output names, and output planning avoids overwriting source files. The build output shows the actual filenames.
 
-This is for standalone files. Multi-source linking, Cargo projects, external libraries and Python dependency management require a separate project build system. Python validation checks syntax; it does not bundle an executable or install imported modules.
+Project mode delegates source trees and dependencies to CMake, Make or Cargo. A small C++ project can also link related sources directly. Python validation checks syntax; it does not bundle an executable or install imported modules.
 
 ## Host and target support
 
@@ -156,4 +232,4 @@ The previews capture actual GHOSTNET terminal output.
 
 ## Development
 
-The scripts remain standalone Bash entry points. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) runs native C++ and Rust builds, Python validation and execution, and launcher checks on Linux, macOS and Windows/MSYS2. The Linux job also checks Windows cross-compilation and output-name collisions.
+The scripts remain standalone Bash entry points. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) runs standalone and multi-source C++ builds, CMake/Make/Cargo project builds and tests, Python project validation and execution, and launcher checks on Linux, macOS and Windows/MSYS2. The Linux job also checks Windows cross-compilation and output-name collisions.

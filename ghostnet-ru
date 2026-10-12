@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
+selected_bash="$(command -v bash)"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    for candidate in /opt/homebrew/bin/bash /usr/local/bin/bash "$selected_bash"; do
+        [[ -x "$candidate" ]] || continue
+        if "$candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) ))' 2>/dev/null; then
+            selected_bash="$candidate"
+            break
+        fi
+    done
+fi
+export PATH="$(dirname -- "$selected_bash"):$PATH"
+if [[ -f "$root/ban-ru.sh" ]]; then
+    exec "$selected_bash" "$root/ban-ru.sh" "$@"
+else
+    exec "$selected_bash" "$root/../share/ghostnet/ban-ru.sh" "$@"
+fi
