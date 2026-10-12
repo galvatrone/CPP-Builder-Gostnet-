@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .ghostnet-build/
 .venv/
+
+# Local release packaging helpers
+/tools/
