@@ -148,17 +148,19 @@ jobs:
         \ $env:MSYS2_ROOT\n    Assert ($LASTEXITCODE -eq 0) 'Native installer failed'\n    $Command = Join-Path $App 'bin\\\
         ghostnet.cmd'\n    $RuCommand = Join-Path $App 'bin\\ghostnet-ru.cmd'\n    $Output = & $Command --version\n    Assert\
         \ ($LASTEXITCODE -eq 0 -and \"$Output\" -match '1.1.0') 'Installed command failed'\n    $UserPath = [Environment]::GetEnvironmentVariable('Path','User')\n\
-        \    Assert ($UserPath.Contains((Join-Path $App 'bin'))) 'User PATH was not updated'\n    foreach ($Part in $OriginalPath.Split(';'))\
-        \ {\n        if ($Part) { Assert ($UserPath.Split(';') -contains $Part) 'Existing PATH entry lost' }\n    }\n    #\
-        \ Cwd and quoting: build/run outside repository, path and selected source contain spaces.\n    $Project = Join-Path\
-        \ $TestRoot 'project with spaces'\n    New-Item -ItemType Directory -Path $Project | Out-Null\n    Set-Content -LiteralPath\
-        \ (Join-Path $Project 'hello world.cpp') -Value '#include <iostream>\nint main(){std::cout << \"NATIVE_CMD_OK\";}'\
-        \ -Encoding ASCII\n    Push-Location $Project\n    try {\n        $Output = & $Command run --mode project --target\
-        \ native .\n        Assert ($LASTEXITCODE -eq 0 -and \"$Output\" -match 'NATIVE_CMD_OK') 'PowerShell command or cwd\
-        \ forwarding failed'\n        $Output = & $env:ComSpec /d /c ('\"' + $RuCommand + '\" --auto --mode project --target\
-        \ native --run .')\n        Assert ($LASTEXITCODE -eq 0 -and \"$Output\" -match 'NATIVE_CMD_OK') 'CMD bridge failed'\n\
-        \    } finally { Pop-Location }\n    & $Installer --yes --no-launch --version v1.1.0 --dir $App --msys2-root $env:MSYS2_ROOT\n\
-        \    Assert ($LASTEXITCODE -eq 0) 'Reinstall failed'\n    Assert ([Environment]::GetEnvironmentVariable('Path','User')\
+        \    $ExpectedBin=[IO.Path]::GetFullPath((Join-Path $App 'bin')).TrimEnd('\\')\n    Write-Host ('Expected user PATH\
+        \ entry: '+$ExpectedBin)\n    Write-Host ('Actual user PATH: '+$UserPath)\n    $HasBin=@($UserPath.Split(';') | Where-Object\
+        \ { $_.TrimEnd('\\') -ieq $ExpectedBin }).Count -gt 0\n    Assert $HasBin 'User PATH was not updated'\n    foreach\
+        \ ($Part in $OriginalPath.Split(';')) {\n        if ($Part) { Assert ($UserPath.Split(';') -contains $Part) 'Existing\
+        \ PATH entry lost' }\n    }\n    # Cwd and quoting: build/run outside repository, path and selected source contain\
+        \ spaces.\n    $Project = Join-Path $TestRoot 'project with spaces'\n    New-Item -ItemType Directory -Path $Project\
+        \ | Out-Null\n    Set-Content -LiteralPath (Join-Path $Project 'hello world.cpp') -Value '#include <iostream>\nint\
+        \ main(){std::cout << \"NATIVE_CMD_OK\";}' -Encoding ASCII\n    Push-Location $Project\n    try {\n        $Output\
+        \ = & $Command run --mode project --target native .\n        Assert ($LASTEXITCODE -eq 0 -and \"$Output\" -match 'NATIVE_CMD_OK')\
+        \ 'PowerShell command or cwd forwarding failed'\n        $Output = & $env:ComSpec /d /c ('\"' + $RuCommand + '\" --auto\
+        \ --mode project --target native --run .')\n        Assert ($LASTEXITCODE -eq 0 -and \"$Output\" -match 'NATIVE_CMD_OK')\
+        \ 'CMD bridge failed'\n    } finally { Pop-Location }\n    & $Installer --yes --no-launch --version v1.1.0 --dir $App\
+        \ --msys2-root $env:MSYS2_ROOT\n    Assert ($LASTEXITCODE -eq 0) 'Reinstall failed'\n    Assert ([Environment]::GetEnvironmentVariable('Path','User')\
         \ -eq $UserPath) 'Reinstall duplicated PATH'\n    # Update is a real request for the latest stable release, never\
         \ main.\n    & $Command update --yes --no-launch\n    Assert ($LASTEXITCODE -eq 0) 'Release updater failed'\n    &\
         \ $Command --help | Out-Null\n    Assert ($LASTEXITCODE -eq 0) 'Updated command failed'\n    Write-Host 'PASS: single-file\
