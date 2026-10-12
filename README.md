@@ -6,7 +6,7 @@ A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-
 
 [English](README.md) · [Русский](README.ru.md) · [Download releases](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest)
 
-![GHOSTNET main menu](assets/ghostnet-menu.png)
+![GHOSTNET main menu](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-menu.png)
 
 ## Download
 
@@ -43,7 +43,9 @@ bash ban.sh
 
 **macOS:** open `ban.command`, or run `"$(brew --prefix bash)/bin/bash" ban.sh` in Terminal. Native builds produce macOS executables. Dependency installation uses an existing Homebrew installation. If Apple's command line tools are missing, install them with `xcode-select --install`.
 
-**Windows:** install [MSYS2](https://www.msys2.org/), then open `ban.cmd`. The launcher uses the MSYS2 **UCRT64** environment, looking in `C:\msys64` by default. For another installation path, set `MSYS2_ROOT` to that folder. You can also run `bash ban.sh` from the MSYS2 UCRT64 terminal. PowerShell and Command Prompt alone do not provide the required Bash/compiler environment.
+**Windows:** download [GHOSTNET-Install.cmd](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.cmd) and double-click it. Confirm installation: it downloads a pinned stable release, verifies SHA-256, prepares MSYS2 tools when missing and creates `ghostnet` / `ghostnet-ru` in your user PATH. Open a new PowerShell or CMD window afterward. Git is not required.
+
+For manual ZIP setup, install [MSYS2](https://www.msys2.org/) and open `ban.cmd`. The launcher uses the MSYS2 **UCRT64** environment, looking in `C:\msys64` by default. For another installation path, set `MSYS2_ROOT` to that folder. You can also run `bash ban.sh` from the MSYS2 UCRT64 terminal. PowerShell and Command Prompt alone do not provide the required Bash/compiler environment.
 
 For the Russian interface, use `ban-ru.sh`, `ban-ru.command` or `ban-ru.cmd`. There is no language-selection menu.
 
@@ -101,15 +103,9 @@ ghostnet run --run-file '.ghostnet-build/{target}/app{exe}' ./cmake-project
 
 `{target}` becomes `linux`, `macos` or `windows`; `{exe}` becomes `.exe` on Windows and is empty elsewhere. Cargo honors its own default binary / `default-run` configuration. Python requires `--run-file app.py`, `run=` in the configuration, or a root `__main__.py`. Existing `.venv/bin/python` or `.venv/Scripts/python.exe` is used automatically. Python dependencies and packaging remain managed by the project; `pyproject.toml` detection does not run pip. Python checks cover root scripts and the selected Python entry; tests use standard `unittest`, not an inferred pytest setup.
 
-## Related C++ / Python example
+## C++ / Python project configuration
 
-Run the included [mixed project](examples/mixed-project/ghostnet.conf):
-
-```bash
-ghostnet run ./examples/mixed-project
-```
-
-It builds two C++ sources with headers from `include/`, then starts Python, which calls the built C++ program. All project entry points run with the project folder as their working directory.
+A project can build related C++ sources and then run a Python entry point from its project directory.
 
 `ghostnet.conf` is a literal text file, one `key=value` per line:
 
@@ -226,10 +222,20 @@ The installer proposes the missing packages before installation. Linux system pa
 
 The previews capture actual GHOSTNET terminal output.
 
-![GHOSTNET building programs](assets/ghostnet-build.png)
+![GHOSTNET building programs](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-build.png)
 
-![GHOSTNET completed build](assets/ghostnet-complete.png)
+![GHOSTNET completed build](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-complete.png)
 
 ## Development
 
 The scripts remain standalone Bash entry points. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) runs standalone and multi-source C++ builds, CMake/Make/Cargo project builds and tests, Python project validation and execution, and launcher checks on Linux, macOS and Windows/MSYS2. The Linux job also checks Windows cross-compilation and output-name collisions.
+
+## Windows updates
+
+```powershell
+ghostnet update
+```
+
+The updater selects the latest published stable release and uses its versioned ZIP and SHA256SUMS. Staging happens before activation; a failed download or checksum does not replace the active version. Previous payload folders remain under `%LOCALAPPDATA%\GHOSTNET\versions`.
+
+Installer options: `--yes`, `--no-launch`, `--version vX.Y.Z`, `--dir PATH`, `--msys2-root PATH`. Default GHOSTNET folder: `%LOCALAPPDATA%\GHOSTNET`; default MSYS2: `C:\msys64`. Fresh MSYS2 installation uses a pinned official x64 installer and verifies its SHA-256. Windows x64 10/11, built-in curl and Windows PowerShell are required. MSYS2 setup may require elevation. User PATH is updated without setx; reopen existing terminals to pick up the change.

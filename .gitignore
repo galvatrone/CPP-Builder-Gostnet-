@@ -5,9 +5,22 @@ __pycache__/
 
 # Local release packaging helpers
 /tools/
-/tests/test_data/
+
 /tests/
 
-# Ignore generated/local executables
+/test_data/
+
+/examples/
+
+/launchers/
+
+/docs/
+
+/downloads/
+
+/assets/
+
+# Preserve local exclusions
+/tests/test_data/
 /gostnet
 /gostnet-ru

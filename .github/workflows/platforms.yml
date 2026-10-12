@@ -1,0 +1,170 @@
+name: Native platform checks
+permissions:
+  contents: read
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-latest
+        - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+    - name: Linux compiler dependencies
+      if: runner.os == 'Linux'
+      run: 'sudo apt-get update
+
+        sudo apt-get install -y g++ g++-mingw-w64-x86-64 rustc cargo cmake ninja-build make
+
+        '
+    - name: macOS Bash dependency
+      if: runner.os == 'macOS'
+      run: 'brew install bash cmake ninja
+
+        echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
+
+        '
+    - name: Check native toolchains
+      run: 'bash --version
+
+        g++ --version
+
+        python3 --version
+
+        rustc --version
+
+        '
+    - name: Both languages and all supported source types
+      run: "set -euo pipefail\nfixture=$(mktemp -d \"${TMPDIR:-/tmp}/ghostnet ci.XXXXXX\")\ntrap 'rm -rf -- \"$fixture\"'\
+        \ EXIT\nprintf 'int answer();\\n' > \"$fixture/helper.h\"\nprintf '#include \"helper.h\"\\nint answer(){return 42;}\\\
+        n' > \"$fixture/helper.cc\"\nprintf '#include \"helper.h\"\\n#include <iostream>\\nint main(){std::cout<<\"GHOSTNET_OK=\"\
+        <<answer();}\\n' > \"$fixture/main.cpp\"\nfor script in ban.sh ban-ru.sh; do\n    bash -n \"$script\"\n    output=$(BAN_NO_ANIMATION=1\
+        \ bash \"$script\" run --mode project --target native \"$fixture\")\n    [[ \"$output\" == *GHOSTNET_OK=42* ]]\ndone\n\
+        prefix=\"$fixture/installed\"\nbash install.sh --prefix \"$prefix\"\n\"$prefix/bin/ghostnet\" --version\n\"$prefix/bin/ghostnet-ru\"\
+        \ --help\n"
+    - name: macOS launchers
+      if: runner.os == 'macOS'
+      run: 'bash ban.command --help
+
+        bash ban-ru.command --help
+
+        '
+  windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-rust mingw-w64-ucrt-x86_64-cmake
+          mingw-w64-ucrt-x86_64-ninja make
+    - name: Check native toolchains
+      shell: msys2 {0}
+      run: 'bash --version
+
+        g++ --version
+
+        python --version
+
+        rustc --version
+
+        '
+    - name: Both languages and all supported source types
+      shell: msys2 {0}
+      run: "set -euo pipefail\nfixture=$(mktemp -d \"${TMPDIR:-/tmp}/ghostnet ci.XXXXXX\")\ntrap 'rm -rf -- \"$fixture\"'\
+        \ EXIT\nprintf 'int answer();\\n' > \"$fixture/helper.h\"\nprintf '#include \"helper.h\"\\nint answer(){return 42;}\\\
+        n' > \"$fixture/helper.cc\"\nprintf '#include \"helper.h\"\\n#include <iostream>\\nint main(){std::cout<<\"GHOSTNET_OK=\"\
+        <<answer();}\\n' > \"$fixture/main.cpp\"\nfor script in ban.sh ban-ru.sh; do\n    bash -n \"$script\"\n    output=$(BAN_NO_ANIMATION=1\
+        \ bash \"$script\" run --mode project --target native \"$fixture\")\n    [[ \"$output\" == *GHOSTNET_OK=42* ]]\ndone\n\
+        prefix=\"$fixture/installed\"\nbash install.sh --prefix \"$prefix\"\n\"$prefix/bin/ghostnet\" --version\n\"$prefix/bin/ghostnet-ru\"\
+        \ --help\n"
+    - name: Windows launchers
+      shell: msys2 {0}
+      run: 'export MSYS2_ROOT="$(cygpath -w /)"
+
+        cmd.exe //c ban.cmd --help
+
+        cmd.exe //c ban-ru.cmd --help
+
+        '
+  native-installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      MSYS2_ROOT: C:\ghostnet-test-msys64
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - name: Verify checksums and staged update behavior
+      shell: powershell
+      run: "$ErrorActionPreference = 'Stop'\n$Installer = Join-Path (Get-Location) 'GHOSTNET-Install.cmd'\nif (!(Test-Path\
+        \ -LiteralPath $Installer)) { throw 'GHOSTNET-Install.cmd is missing' }\n$Text = Get-Content -LiteralPath $Installer\
+        \ -Raw\n$Body = ($Text -split '(?m)^# GHOSTNET POWERSHELL START\\r?$',2)[1]\n$Tokens=$null; $Errors=$null\n$Ast=[System.Management.Automation.Language.Parser]::ParseInput($Body,[ref]$Tokens,[ref]$Errors)\n\
+        if ($Errors.Count) { throw ($Errors | Out-String) }\n$Ast.FindAll({param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)\
+        \ | ForEach-Object { . ([scriptblock]::Create($_.Extent.Text)) }\n$Fixture=Join-Path ([IO.Path]::GetTempPath()) ('ghostnet-core-'+[guid]::NewGuid())\n\
+        New-Item -ItemType Directory -Path $Fixture | Out-Null\nfunction Assert($Condition,$Message) { if (!$Condition) {\
+        \ throw $Message } }\ntry {\n    $Payload=Join-Path $Fixture 'payload'; New-Item -ItemType Directory -Path (Join-Path\
+        \ $Payload 'GHOSTNET') | Out-Null\n    foreach ($Name in 'ban.sh','ban-ru.sh') { Set-Content -LiteralPath (Join-Path\
+        \ $Payload \"GHOSTNET/$Name\") -Value '#!/bin/bash' }\n    $Zip=Join-Path $Fixture 'ghostnet-windows.zip'\n    Compress-Archive\
+        \ -LiteralPath (Join-Path $Payload 'GHOSTNET') -DestinationPath $Zip\n    $Hash=(Get-FileHash -LiteralPath $Zip -Algorithm\
+        \ SHA256).Hash.ToLower()\n    $Sums=Join-Path $Fixture 'SHA256SUMS'; Set-Content -LiteralPath $Sums -Value \"$Hash\
+        \  ghostnet-windows.zip\"\n    $Root=Join-Path $Fixture 'installed'; New-Item -ItemType Directory -Path $Root | Out-Null\n\
+        \    $State=Join-Path $Root 'installation.json'; Set-Content -LiteralPath $State -Value '{\"Version\":\"old\"}'\n\
+        \    $Before=[IO.File]::ReadAllBytes($State)\n    Set-Content -LiteralPath $Sums -Value (('0'*64)+'  ghostnet-windows.zip')\n\
+        \    $Rejected=$false\n    try { Install-Payload $Zip $Sums 'v1.1.0' $Root | Out-Null } catch { $Rejected=$true }\n\
+        \    Assert $Rejected 'Corrupt archive was accepted'\n    Assert ([Convert]::ToBase64String([IO.File]::ReadAllBytes($State))\
+        \ -eq [Convert]::ToBase64String($Before)) 'Bad checksum changed active installation'\n    Set-Content -LiteralPath\
+        \ $Sums -Value \"$Hash  ghostnet-windows.zip\"\n    $Installed=Install-Payload $Zip $Sums 'v1.1.0' $Root\n    Assert\
+        \ (Test-Path -LiteralPath (Join-Path $Installed 'ban.sh')) 'Verified archive not installed'\n    Assert ((Get-Content\
+        \ -LiteralPath $State -Raw) -match 'old') 'Staging activated a version prematurely'\n    # Reject traversal before\
+        \ extraction, even when checksum is valid.\n    Add-Type -AssemblyName System.IO.Compression.FileSystem\n    $Bad=Join-Path\
+        \ $Fixture 'bad.zip'\n    $Archive=[IO.Compression.ZipFile]::Open($Bad,[IO.Compression.ZipArchiveMode]::Create)\n\
+        \    $Entry=$Archive.CreateEntry('../escaped.txt');$Writer=New-Object IO.StreamWriter($Entry.Open());$Writer.Write('bad');$Writer.Dispose();$Archive.Dispose()\n\
+        \    $BadHash=(Get-FileHash -LiteralPath $Bad -Algorithm SHA256).Hash\n    Set-Content -LiteralPath $Sums -Value \"\
+        $BadHash  ghostnet-windows.zip\"\n    $Rejected=$false\n    try { Install-Payload $Bad $Sums 'v1.1.1' $Root | Out-Null\
+        \ } catch { $Rejected=$true }\n    Assert $Rejected 'Traversal ZIP was accepted'\n    Assert (!(Test-Path -LiteralPath\
+        \ (Join-Path $Root 'escaped.txt'))) 'ZIP wrote outside payload'\n    Write-Host 'PASS: checksum verification, staged\
+        \ payload, previous installation preservation and ZIP validation'\n} finally { Remove-Item -LiteralPath $Fixture -Recurse\
+        \ -Force }\n"
+    - name: Install with fresh MSYS2 and exercise commands
+      shell: powershell
+      run: "$ErrorActionPreference = 'Stop'\n$Repo = (Get-Location).Path\n$Installer = Join-Path $Repo 'GHOSTNET-Install.cmd'\n\
+        if (!(Test-Path -LiteralPath $Installer)) { throw 'GHOSTNET-Install.cmd is missing' }\n$TestRoot = Join-Path $env:TEMP\
+        \ ('ghostnet native test ' + [guid]::NewGuid())\n$App = Join-Path $TestRoot 'installed application'\n$OriginalPath\
+        \ = [Environment]::GetEnvironmentVariable('Path','User')\nNew-Item -ItemType Directory -Path $TestRoot | Out-Null\n\
+        function Assert($Condition,$Message) { if (!$Condition) { throw $Message } }\ntry {\n    # Exercise single-file bootstrap\
+        \ against a real already-published release.\n    & $Installer --yes --no-launch --version v1.1.0 --dir $App --msys2-root\
+        \ $env:MSYS2_ROOT\n    Assert ($LASTEXITCODE -eq 0) 'Native installer failed'\n    $Command = Join-Path $App 'bin\\\
+        ghostnet.cmd'\n    $RuCommand = Join-Path $App 'bin\\ghostnet-ru.cmd'\n    $Output = & $Command --version\n    Assert\
+        \ ($LASTEXITCODE -eq 0 -and \"$Output\" -match '1.1.0') 'Installed command failed'\n    $UserPath = [Environment]::GetEnvironmentVariable('Path','User')\n\
+        \    Assert ($UserPath.Contains((Join-Path $App 'bin'))) 'User PATH was not updated'\n    foreach ($Part in $OriginalPath.Split(';'))\
+        \ {\n        if ($Part) { Assert ($UserPath.Split(';') -contains $Part) 'Existing PATH entry lost' }\n    }\n    #\
+        \ Cwd and quoting: build/run outside repository, path and selected source contain spaces.\n    $Project = Join-Path\
+        \ $TestRoot 'project with spaces'\n    New-Item -ItemType Directory -Path $Project | Out-Null\n    Set-Content -LiteralPath\
+        \ (Join-Path $Project 'hello world.cpp') -Value '#include <iostream>\nint main(){std::cout << \"NATIVE_CMD_OK\";}'\
+        \ -Encoding ASCII\n    Push-Location $Project\n    try {\n        $Output = & $Command run --mode project --target\
+        \ native .\n        Assert ($LASTEXITCODE -eq 0 -and \"$Output\" -match 'NATIVE_CMD_OK') 'PowerShell command or cwd\
+        \ forwarding failed'\n        $Output = & $env:ComSpec /d /c ('\"' + $RuCommand + '\" --auto --mode project --target\
+        \ native --run .')\n        Assert ($LASTEXITCODE -eq 0 -and \"$Output\" -match 'NATIVE_CMD_OK') 'CMD bridge failed'\n\
+        \    } finally { Pop-Location }\n    & $Installer --yes --no-launch --version v1.1.0 --dir $App --msys2-root $env:MSYS2_ROOT\n\
+        \    Assert ($LASTEXITCODE -eq 0) 'Reinstall failed'\n    Assert ([Environment]::GetEnvironmentVariable('Path','User')\
+        \ -eq $UserPath) 'Reinstall duplicated PATH'\n    # Update is a real request for the latest stable release, never\
+        \ main.\n    & $Command update --yes --no-launch\n    Assert ($LASTEXITCODE -eq 0) 'Release updater failed'\n    &\
+        \ $Command --help | Out-Null\n    Assert ($LASTEXITCODE -eq 0) 'Updated command failed'\n    Write-Host 'PASS: single-file\
+        \ install, native cmd/PowerShell commands, cwd, PATH and update'\n} finally {\n    [Environment]::SetEnvironmentVariable('Path',$OriginalPath,'User')\n\
+        \    Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue\n}\n"
+'on':
+  push: null
+  pull_request: null
+  workflow_dispatch: null

@@ -44,7 +44,7 @@ GHOSTNET — сборка программ для Linux, Windows и macOS
   --run              Запустить программу после успешной сборки
   --yes              Разрешить установку пакетов без дополнительного вопроса
   --no-animation     Отключить анимации
-  --version          GHOSTNET 1.1.0
+  --version          GHOSTNET 1.1.1
   --help             Показать справку
 
 Пример: bash ban.sh --auto --target linux --run ./project
@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
         --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         --yes) ASSUME_YES=1 ;;
         --no-animation) BAN_NO_ANIMATION=1 ;;
-        --version) printf 'GHOSTNET 1.1.0\n'; exit 0 ;;
+        --version) printf 'GHOSTNET 1.1.1\n'; exit 0 ;;
         --help|-h) usage; exit 0 ;;
         --)
             shift

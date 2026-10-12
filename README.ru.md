@@ -6,7 +6,7 @@
 
 [English](README.md) · [Русский](README.ru.md) · [Скачать релиз](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest)
 
-![Главное меню GHOSTNET](assets/ghostnet-menu.png)
+![Главное меню GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-menu.png)
 
 ## Скачать
 
@@ -43,7 +43,9 @@ bash ban-ru.sh
 
 **macOS:** откройте `ban-ru.command` или выполните `"$(brew --prefix bash)/bin/bash" ban-ru.sh` в Terminal. Нативная сборка создаёт исполняемые файлы macOS. Для установки инструментов используется уже установленный Homebrew. Если отсутствуют инструменты командной строки Apple, установите их командой `xcode-select --install`.
 
-**Windows:** установите [MSYS2](https://www.msys2.org/), затем откройте `ban-ru.cmd`. Лаунчер использует среду MSYS2 **UCRT64** и по умолчанию ищет её в `C:\msys64`. Для другого расположения задайте `MSYS2_ROOT`, указав папку установки. Можно также выполнить `bash ban-ru.sh` в терминале MSYS2 UCRT64. Одних PowerShell или командной строки недостаточно: нужна среда Bash и компиляторов MSYS2.
+**Windows:** скачайте [GHOSTNET-Install.cmd](https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.cmd) и запустите двойным кликом. Подтвердите установку: загрузится закреплённый стабильный релиз, проверится SHA-256, при необходимости установятся MSYS2 и инструменты, а команды `ghostnet` / `ghostnet-ru` добавятся в пользовательский PATH. Затем откройте новое окно PowerShell или CMD. Git не требуется.
+
+Для ручной установки из ZIP установите [MSYS2](https://www.msys2.org/) и откройте `ban-ru.cmd`. Лаунчер использует среду MSYS2 **UCRT64** и по умолчанию ищет её в `C:\msys64`. Для другого расположения задайте `MSYS2_ROOT`, указав папку установки. Можно также выполнить `bash ban-ru.sh` в терминале MSYS2 UCRT64. Одних PowerShell или командной строки недостаточно: нужна среда Bash и компиляторов MSYS2.
 
 Для английского интерфейса используйте `ban.sh`, `ban.command` или `ban.cmd`. Меню переключения языка отсутствует.
 
@@ -101,15 +103,9 @@ ghostnet-ru run --run-file '.ghostnet-build/{target}/app{exe}' ./cmake-project
 
 `{target}` заменяется на `linux`, `macos` или `windows`, `{exe}` — на `.exe` для Windows и пустую строку для других систем. Cargo использует собственную основную программу / `default-run`. Для Python укажите `--run-file app.py`, `run=` в настройках или создайте корневой `__main__.py`. Существующий интерпретатор `.venv/bin/python` или `.venv/Scripts/python.exe` выбирается автоматически. Зависимости и упаковкой Python управляет сам проект: определение `pyproject.toml` не запускает pip. Проверяются корневые скрипты и выбранная Python-точка запуска; тесты запускаются через стандартный `unittest`, автоматического определения pytest нет.
 
-## Пример C++ вместе с Python
+## Настройка проекта C++ / Python
 
-Запустите включённый [смешанный проект](examples/mixed-project/ghostnet.conf):
-
-```bash
-ghostnet-ru run ./examples/mixed-project
-```
-
-Он собирает два исходника C++ с заголовками из `include/`, затем запускает Python, который вызывает собранную программу. Рабочая папка при запуске — папка проекта.
+Проект может собрать связанные исходники C++, затем запустить точку входа Python из своей папки.
 
 `ghostnet.conf` — обычный текстовый файл, одна запись `ключ=значение` на строку:
 
@@ -226,10 +222,20 @@ BAN_RUN_FILE=hello bash ban-ru.sh --auto --target native --run ./project
 
 Изображения созданы из настоящего терминального вывода GHOSTNET.
 
-![Сборка программ в GHOSTNET](assets/ghostnet-build.png)
+![Сборка программ в GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-build.png)
 
-![Завершённая сборка GHOSTNET](assets/ghostnet-complete.png)
+![Завершённая сборка GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/ghostnet-complete.png)
 
 ## Разработка
 
 Скрипты остаются самостоятельными точками входа на Bash. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) проверяет сборку отдельных и связанных исходников C++, проекты CMake/Make/Cargo и их тесты, проверку и запуск Python-проектов, а также лаунчеры на Linux, macOS и Windows/MSYS2. Задача Linux также проверяет кросс-компиляцию для Windows и защиту от совпадений имён выходных файлов.
+
+## Обновление на Windows
+
+```powershell
+ghostnet update
+```
+
+Обновление выбирает последний опубликованный стабильный релиз и скачивает ZIP и SHA256SUMS по адресу конкретной версии. Подготовка выполняется до переключения: ошибка загрузки или проверки суммы не заменяет активную версию. Предыдущие версии сохраняются в `%LOCALAPPDATA%\GHOSTNET\versions`.
+
+Параметры установщика: `--yes`, `--no-launch`, `--version vX.Y.Z`, `--dir ПУТЬ`, `--msys2-root ПУТЬ`. По умолчанию GHOSTNET устанавливается в `%LOCALAPPDATA%\GHOSTNET`, MSYS2 — в `C:\msys64`. Для новой установки используется закреплённый официальный установщик MSYS2 x64 с проверкой SHA-256. Требуются Windows x64 10/11, встроенные curl и Windows PowerShell. Установка MSYS2 может запросить права администратора. PATH изменяется через API пользовательского окружения без setx; уже открытый терминал нужно перезапустить.
