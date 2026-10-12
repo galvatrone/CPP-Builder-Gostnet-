@@ -5,3 +5,10 @@ __pycache__/
 
 # Local release packaging helpers
 /tools/
+/tests/test_data/
+/tests/
+
+
+# Ignore all other files
+./gostnet
+./gostnet-ru
