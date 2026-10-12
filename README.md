@@ -156,4 +156,4 @@ The previews capture actual GHOSTNET terminal output.
 
 ## Development
 
-The scripts remain standalone Bash entry points. CI is configured to validate the supported Linux, macOS and Windows/MSYS2 hosts. Host-specific behavior still needs verification on the corresponding operating system; a Linux test run alone does not establish macOS or Windows compatibility.
+The scripts remain standalone Bash entry points. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) runs native C++ and Rust builds, Python validation and execution, and launcher checks on Linux, macOS and Windows/MSYS2. The Linux job also checks Windows cross-compilation and output-name collisions.

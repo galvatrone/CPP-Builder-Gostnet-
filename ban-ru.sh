@@ -115,7 +115,7 @@ fi
 lines=(
 "$BLUE  ███████████████████████████████████████████████████████████████████████$RESET"
 "$GREEN █           SYSTEM BOOTING          INITIALIZING CORE                █$RESET"
-"$PURPLE█           GHOST PROTOCOL        ctOS TERMINAL  v2.7.4              █$RESET"
+"${PURPLE}█           GHOST PROTOCOL        ctOS TERMINAL  v2.7.4              █$RESET"
 "$RED   ███████████████████████████████████████████████████████████████████████$RESET"
 )
 

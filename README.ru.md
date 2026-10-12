@@ -156,4 +156,4 @@ BAN_RUN_FILE=hello bash ban-ru.sh --auto --target native --run ./project
 
 ## Разработка
 
-Скрипты остаются самостоятельными точками входа на Bash. CI настроен для проверки поддерживаемых сред Linux, macOS и Windows/MSYS2. Особенности каждой системы требуют проверки на соответствующей ОС; одних тестов на Linux недостаточно для подтверждения совместимости с macOS или Windows.
+Скрипты остаются самостоятельными точками входа на Bash. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) проверяет нативную сборку C++ и Rust, проверку и запуск Python, а также лаунчеры на Linux, macOS и Windows/MSYS2. Задача Linux также проверяет кросс-компиляцию для Windows и защиту от совпадений имён выходных файлов.
