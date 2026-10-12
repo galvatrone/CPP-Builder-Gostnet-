@@ -56,6 +56,44 @@ jobs:
         bash tools/ban-ru.command --help
 
         '
+    - name: OS installer, local payload and verified release
+      run: 'set -euo pipefail
+
+        fixture=$(mktemp -d "${TMPDIR:-/tmp}/ghostnet bootstrap.XXXXXX")
+
+        trap ''rm -rf -- "$fixture"'' EXIT
+
+        export HOME="$fixture/home"
+
+        mkdir -p "$HOME"
+
+        printf ''# preserve settings\n'' > "$HOME/.bashrc"
+
+        # /bin/bash exercises the original Bash 3.2 on macOS.
+
+        /bin/bash tools/GHOSTNET-Install.sh --yes --no-launch --prefix "$fixture/local tools"
+
+        /bin/bash tools/GHOSTNET-Install.sh --yes --no-launch --prefix "$fixture/local tools"
+
+        [[ $(grep -c ''# GHOSTNET PATH'' "$HOME/.bashrc") == 1 ]]
+
+        source "$HOME/.bashrc"
+
+        [[ $(command -v ghostnet) == "$fixture/local tools/bin/ghostnet" ]]
+
+        ghostnet --version | grep ''1.2.0''
+
+        printf ''#include <iostream>\nint main(){std::cout<<"BOOTSTRAP_OK";}\n'' > "$fixture/main.cpp"
+
+        ghostnet run --mode project --target native "$fixture" | grep BOOTSTRAP_OK
+
+        # Test downloads/checksum against an already-published release.
+
+        /bin/bash tools/GHOSTNET-Install.sh --yes --no-launch --prefix "$fixture/release tools" --version v1.1.1
+
+        "$fixture/release tools/bin/ghostnet" --version | grep ''1.1.1''
+
+        '
   windows:
     runs-on: windows-latest
     steps:

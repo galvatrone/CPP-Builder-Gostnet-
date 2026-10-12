@@ -44,7 +44,7 @@ Run without arguments for the arrow-key menu (↑/↓ and Enter).
   --run              Run the program after a successful build
   --yes              Allow package installation without another confirmation
   --no-animation     Disable animations
-  --version          GHOSTNET 1.1.1
+  --version          GHOSTNET 1.2.0
   --help             Show help
 
 Example: bash ban.sh --auto --target linux --run ./project
@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
         --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         --yes) ASSUME_YES=1 ;;
         --no-animation) BAN_NO_ANIMATION=1 ;;
-        --version) printf 'GHOSTNET 1.1.1\n'; exit 0 ;;
+        --version) printf 'GHOSTNET 1.2.0\n'; exit 0 ;;
         --help|-h) usage; exit 0 ;;
         --)
             shift

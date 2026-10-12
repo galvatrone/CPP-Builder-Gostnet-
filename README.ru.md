@@ -8,6 +8,38 @@
 
 ![Главное меню GHOSTNET](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-menu.png)
 
+## Быстрая установка
+
+**Linux / macOS — вставьте в терминал:**
+
+```bash
+bash -c 'f=$(mktemp) || exit; trap '\''rm -f "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f" && bash "$f"'
+```
+
+Установщик определяет ОС и устанавливает недостающие Bash 4.4+, компилятор C++, Python, Rust/Cargo, CMake, Ninja и Make. В Linux поддерживаются apt, dnf и pacman; может понадобиться sudo. В macOS используется Homebrew: если его нет, установщик предложит установку. Если появится окно инструментов Apple, завершите их установку и повторите команду. Библиотеки проекта и пакеты Python устанавливаются средствами самого проекта.
+
+**Windows 10/11 x64 — вставьте в PowerShell:**
+
+```powershell
+$f = Join-Path $env:TEMP ('GHOSTNET-Install-' + [guid]::NewGuid() + '.cmd'); try { Invoke-WebRequest -UseBasicParsing -ErrorAction Stop 'https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.cmd' -OutFile $f; & $f; if ($LASTEXITCODE -ne 0) { throw 'Installation failed' } } finally { Remove-Item -LiteralPath $f -ErrorAction SilentlyContinue }
+```
+
+Команда скачивает самостоятельный установщик Windows, который подготавливает MSYS2/UCRT64 и инструменты сборки. Git не нужен. У Bash и PowerShell различается синтаксис, поэтому выберите команду для своего терминала.
+
+Оба установщика запрашивают подтверждение, скачивают ZIP конкретной стабильной версии для вашей ОС и проверяют SHA-256. После установки откройте новый терминал и запустите `ghostnet` или `ghostnet-ru`. Для автоматической установки добавьте к вызову установщика `--yes --no-launch`. Linux/macOS поддерживают `--prefix /полный/путь` и `--version vX.Y.Z`; Windows — `--dir PATH` и `--version vX.Y.Z`.
+
+**ZIP уже скачан?** В каждом архиве рядом с обеими языковыми версиями лежит нужный установщик:
+
+| Архив | Установка из распакованной папки |
+| --- | --- |
+| Linux | `bash GHOSTNET-Install.sh` |
+| macOS | Откройте `GHOSTNET-Install.command` или выполните `bash GHOSTNET-Install.sh` |
+| Windows | Откройте `GHOSTNET-Install.cmd` |
+| Все платформы | Все три установщика |
+
+Linux/macOS устанавливают локальные распакованные скрипты после проверки зависимостей. Windows скачивает проверяемый релиз указанной версии. В ZIP нет изображений, тестов, примеров и вспомогательных файлов разработки.
+
+
 ## Скачать
 
 Скачайте и распакуйте архив для своей системы. Каждый архив содержит независимые скрипты: английский `ban.sh` и русский `ban-ru.sh`. Для работы одного второй не требуется.

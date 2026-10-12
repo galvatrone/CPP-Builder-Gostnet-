@@ -9,6 +9,8 @@ __pycache__/
 !/tools/ghostnet-ru
 !/tools/install.sh
 !/tools/GHOSTNET-Install.cmd
+!/tools/GHOSTNET-Install.sh
+!/tools/GHOSTNET-Install.command
 !/tools/ban.cmd
 !/tools/ban-ru.cmd
 !/tools/ban.command

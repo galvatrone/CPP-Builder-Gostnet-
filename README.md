@@ -8,6 +8,38 @@ A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-
 
 ![GHOSTNET main menu](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-menu.png)
 
+## Quick installation
+
+**Linux / macOS — paste into Terminal:**
+
+```bash
+bash -c 'f=$(mktemp) || exit; trap '\''rm -f "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f" && bash "$f"'
+```
+
+The installer detects the OS and installs missing Bash 4.4+, C++ compiler, Python, Rust/Cargo, CMake, Ninja and Make. Linux supports apt, dnf and pacman (sudo may be required). macOS uses Homebrew and installs it when missing; follow Apple's command line tools dialog if prompted, then rerun. Project-specific libraries and Python packages remain managed by your project.
+
+**Windows 10/11 x64 — paste into PowerShell:**
+
+```powershell
+$f = Join-Path $env:TEMP ('GHOSTNET-Install-' + [guid]::NewGuid() + '.cmd'); try { Invoke-WebRequest -UseBasicParsing -ErrorAction Stop 'https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.cmd' -OutFile $f; & $f; if ($LASTEXITCODE -ne 0) { throw 'Installation failed' } } finally { Remove-Item -LiteralPath $f -ErrorAction SilentlyContinue }
+```
+
+This downloads the standalone Windows installer, which prepares MSYS2/UCRT64 and its build tools. Git is not required. Bash and PowerShell use different command syntax, so choose the command for your terminal.
+
+Both installers ask before installing, download a pinned stable platform ZIP and verify its SHA-256. After installation, open a new terminal and use `ghostnet` or `ghostnet-ru`. Add `--yes --no-launch` to the installer invocation for unattended setup. Linux/macOS support `--prefix /absolute/path` and `--version vX.Y.Z`; Windows supports `--dir PATH` and `--version vX.Y.Z`.
+
+**Already downloaded a ZIP?** Each archive includes its installer alongside both languages:
+
+| Archive | Install from the extracted folder |
+| --- | --- |
+| Linux | `bash GHOSTNET-Install.sh` |
+| macOS | Open `GHOSTNET-Install.command`, or `bash GHOSTNET-Install.sh` |
+| Windows | Open `GHOSTNET-Install.cmd` |
+| All platforms | All three installers |
+
+Linux/macOS install the local extracted scripts after checking dependencies. Windows uses the verified pinned release download. Archives exclude screenshots, tests, examples and development helpers.
+
+
 ## Download
 
 Download the archive for your host and extract it. Every archive includes the independent English `ban.sh` and Russian `ban-ru.sh` scripts; neither needs the other.
