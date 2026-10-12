@@ -37,6 +37,7 @@ GHOSTNET — сборка программ для Linux, Windows и macOS
 
 Запуск без параметров: меню со стрелками ↑/↓ и Enter.
 
+  --type TYPE        Шаблон для ghostnet init
   --check            Проверить необходимые инструменты
   --install-deps     Установить недостающие инструменты
   --auto             Проверить окружение и собрать без лишних вопросов
@@ -56,6 +57,8 @@ HELP
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        init) ACTION="init" ;;
+        --type) [[ $# -ge 2 ]] || { printf '[ERROR] --type requires a value.\n' >&2; exit 2; }; INIT_TYPE="$2"; shift ;;
         inspect) ACTION="inspect"; TARGET_DIR_PRESET="${TARGET_DIR_PRESET:-.}" ;;
         languages) ACTION="languages" ;;
         build) ACTION="build" ;;
@@ -366,6 +369,81 @@ project_passport() {
     printf '  %-10s › %s\n\n' "$(ui ENTRY ЗАПУСК)" "${entry:-$(ui 'select after build' 'выбор после сборки')}"
 }
 
+
+feature_error() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+init_project() {
+    local destination="${TARGET_DIR:-}" kind="$INIT_TYPE" files=() sdk framework=net8.0
+    local kinds=(cpp cmake c rust python go java javascript typescript csharp bash ruby php lua swift kotlin dart zig)
+    if [[ -z "$kind" ]]; then
+        choose_menu "$(ui 'Create project (↑/↓ + Enter):' 'Создать проект (↑/↓ + Enter):')" 0 \
+            'C++ single file' 'C++ CMake' 'C single file' 'Rust / Cargo' 'Python' 'Go' 'Java' \
+            'JavaScript / Node' 'TypeScript / Node' 'C# / .NET' 'Bash' 'Ruby' 'PHP' 'Lua' 'Swift / SwiftPM' 'Kotlin' 'Dart' 'Zig'
+        kind="${kinds[$MENU_SELECTED]}"
+    fi
+    case "$kind" in cpp|cmake|c|rust|python|go|java|javascript|typescript|csharp|bash|ruby|php|lua|swift|kotlin|dart|zig) ;;
+        *) feature_error "$(ui 'Unknown project type:' 'Неизвестный тип проекта:') $kind" ;; esac
+    if [[ -z "$destination" && -t 0 && -t 1 ]]; then
+        read -r -p "$(ui 'New project folder (my-project): ' 'Папка нового проекта (my-project): ')" destination || exit 1
+    fi
+    destination="${destination:-my-project}"
+    [[ ! -L "$destination" ]] || feature_error "$(ui 'Project folder must not be a symlink.' 'Папка проекта не должна быть символической ссылкой.')"
+    if [[ -e "$destination" ]]; then
+        [[ -d "$destination" ]] || feature_error "$(ui 'Path already exists:' 'Путь уже существует:') $destination"
+        while IFS= read -r -d '' item; do files+=("$item"); done < <(find "$destination" -mindepth 1 -maxdepth 1 -print0)
+        [[ ${#files[@]} -eq 0 ]] || feature_error "$(ui 'Project folder must be empty; existing files were preserved.' 'Папка проекта должна быть пустой; существующие файлы сохранены.')"
+    fi
+    mkdir -p -- "$destination" || exit 1
+    init_write() { mkdir -p -- "$destination/$(dirname -- "$1")" && printf '%s\n' "$2" > "$destination/$1"; }
+    init_write .gitignore $'.ghostnet-build/\n.venv/\n__pycache__/\n*.pyc\nbuild/\ntarget/\nnode_modules/\nbin/\nobj/\n.build/\n.dart_tool/\n.zig-cache/\nzig-out/' || exit 1
+    case "$kind" in
+        cpp) init_write main.cpp $'#include <iostream>\nint main() { std::cout << "Hello GHOSTNET!\\n"; }' ;;
+        cmake)
+            init_write CMakeLists.txt $'cmake_minimum_required(VERSION 3.16)\nproject(GhostnetApp LANGUAGES CXX)\nset(CMAKE_CXX_STANDARD 17)\nadd_executable(app src/main.cpp)\nenable_testing()\nadd_test(NAME greeting COMMAND app)\nset_tests_properties(greeting PROPERTIES PASS_REGULAR_EXPRESSION "Hello GHOSTNET")'
+            init_write src/main.cpp $'#include <iostream>\nint main() { std::cout << "Hello GHOSTNET!\\n"; }'
+            init_write ghostnet.conf $'builder=cmake\nrun=.ghostnet-build/{target}/app{exe}' ;;
+        c) init_write main.c $'#include <stdio.h>\nint main(void) { puts("Hello GHOSTNET!"); return 0; }' ;;
+        rust)
+            init_write Cargo.toml $'[package]\nname = "ghostnet_app"\nversion = "0.1.0"\nedition = "2021"'
+            init_write src/main.rs 'fn main() { println!("Hello GHOSTNET!"); }' ;;
+        python)
+            init_write pyproject.toml $'[project]\nname = "ghostnet-app"\nversion = "0.1.0"'
+            init_write app.py $'def greet(name):\n    return f"Hello {name}!"'
+            init_write __main__.py $'from app import greet\nprint(greet("GHOSTNET"))'
+            init_write tests/test_app.py $'import unittest\nfrom app import greet\nclass GreetingTest(unittest.TestCase):\n    def test_name(self):\n        self.assertEqual(greet("Ada"), "Hello Ada!")' ;;
+        go)
+            init_write go.mod $'module example.com/ghostnet-app\n\ngo 1.20'
+            init_write main.go $'package main\nimport "fmt"\nfunc main() { fmt.Println("Hello GHOSTNET!") }' ;;
+        java) init_write Main.java $'public class Main {\n    public static void main(String[] args) { System.out.println("Hello GHOSTNET!"); }\n}' ;;
+        javascript)
+            init_write package.json '{"name":"ghostnet-app","version":"0.1.0","private":true,"scripts":{"build":"node --check main.js","start":"node main.js","test":"node --test"}}'
+            init_write main.js 'console.log("Hello GHOSTNET!");' ;;
+        typescript)
+            init_write package.json '{"name":"ghostnet-app","version":"0.1.0","private":true,"scripts":{"build":"tsc -p tsconfig.json","start":"node .ghostnet-build/node/main.js","test":"node --test"},"devDependencies":{"typescript":"^5.0.0"}}'
+            init_write tsconfig.json '{"compilerOptions":{"target":"ES2020","module":"CommonJS","outDir":".ghostnet-build/node","strict":true},"include":["main.ts"]}'
+            init_write main.ts 'const message: string = "Hello GHOSTNET!"; console.log(message);' ;;
+        csharp)
+            if command -v dotnet >/dev/null 2>&1; then
+                sdk=$(dotnet --version 2>/dev/null); sdk="${sdk%%.*}"
+                [[ "$sdk" =~ ^[0-9]+$ && "$sdk" -ge 6 ]] && framework="net$sdk.0"
+            fi
+            init_write GhostnetApp.csproj "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>$framework</TargetFramework></PropertyGroup></Project>"
+            init_write Program.cs 'System.Console.WriteLine("Hello GHOSTNET!");' ;;
+        bash) init_write main.sh $'#!/usr/bin/env bash\nprintf "Hello GHOSTNET!\\n"' ;;
+        ruby) init_write main.rb 'puts "Hello GHOSTNET!"' ;;
+        php) init_write main.php '<?php echo "Hello GHOSTNET!\n";' ;;
+        lua) init_write main.lua 'print("Hello GHOSTNET!")' ;;
+        swift)
+            init_write Package.swift $'// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: "GhostnetApp", targets: [.executableTarget(name: "GhostnetApp")])'
+            init_write Sources/GhostnetApp/main.swift 'print("Hello GHOSTNET!")' ;;
+        kotlin) init_write Main.kt 'fun main() { println("Hello GHOSTNET!") }' ;;
+        dart) init_write main.dart 'void main() { print("Hello GHOSTNET!"); }' ;;
+        zig) init_write main.zig $'const std = @import("std");\npub fn main() void { std.debug.print("Hello GHOSTNET!\\n", .{}); }' ;;
+    esac
+    [[ $? -eq 0 ]] || exit 1
+    printf '%b[INIT COMPLETE]%b %s (%s)\n' "$GREEN" "$RESET" "$destination" "$kind"
+    printf '  ghostnet run --target native %q\n' "$destination"
+}
+
 if [[ "$ACTION" == languages ]]; then languages_list; exit 0; fi
 
 if [[ -z "$ACTION" ]]; then
@@ -377,7 +455,8 @@ if [[ -z "$ACTION" ]]; then
             "Полная автосборка" \
             "Выход" \
             "$(ui 'Inspect project' 'Паспорт проекта')" \
-            "$(ui 'Supported languages' 'Поддерживаемые языки')"
+            "$(ui 'Supported languages' 'Поддерживаемые языки')" \
+            "$(ui 'Create project' 'Создать проект')"
         case "$MENU_SELECTED" in
             0) ACTION="check" ;;
             1) ACTION="install" ;;
@@ -386,11 +465,14 @@ if [[ -z "$ACTION" ]]; then
             4) exit 0 ;;
             5) ACTION="inspect"; TARGET_DIR_PRESET="." ;;
             6) languages_list; exit 0 ;;
+            7) ACTION="init" ;;
         esac
     else
         ACTION="build"
     fi
 fi
+
+if [[ "$ACTION" == init ]]; then init_project; exit $?; fi
 
 case "$ACTION" in
     check|install|build|auto|test|inspect) ;;
