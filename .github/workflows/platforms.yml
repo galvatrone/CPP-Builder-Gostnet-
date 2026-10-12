@@ -79,7 +79,7 @@ jobs:
 
         source "$HOME/.bashrc"
 
-        [[ $(command -v ghostnet) == "$fixture/local tools/bin/ghostnet" ]]
+        [[ $(command -v ghostnet) -ef "$fixture/local tools/bin/ghostnet" ]]
 
         ghostnet --version | grep ''1.2.0''
 
