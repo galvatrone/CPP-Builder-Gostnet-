@@ -26,10 +26,12 @@ TARGET_DIR_PRESET="${BAN_TARGET_DIR:-}"
 TARGET_DIR=""
 ASSUME_YES=0
 BUILD_MODE="${BAN_BUILD_MODE:-auto}"
+INTERFACE_LANG=en
+INIT_TYPE=""
 
 usage() {
     cat <<'HELP'
-Commands: ghostnet build|run|test|check [options] [folder]
+Commands: ghostnet build|run|test|check|inspect|languages [options] [folder]
 
 GHOSTNET — build helper for Linux, Windows and macOS
 
@@ -54,6 +56,8 @@ HELP
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        inspect) ACTION="inspect"; TARGET_DIR_PRESET="${TARGET_DIR_PRESET:-.}" ;;
+        languages) ACTION="languages" ;;
         build) ACTION="build" ;;
         run) ACTION="auto"; RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         test) ACTION="test" ;;
@@ -319,6 +323,51 @@ choose_menu() {
     printf "\n"
 }
 
+
+# Additive UI helpers; each language script remains self-contained.
+ui() { if [[ "$INTERFACE_LANG" == ru ]]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+language_name() {
+    case "$1" in
+        *.cpp|*.cc|*.cxx) printf 'C++' ;; *.c) printf 'C' ;; *.rs) printf 'Rust' ;;
+        *.py) printf 'Python' ;; *.go) printf 'Go' ;; *.java) printf 'Java' ;;
+        *.js|*.mjs|*.cjs) printf 'JavaScript' ;; *.ts|*.mts|*.cts) printf 'TypeScript' ;;
+        *.cs) printf 'C#' ;; *.sh) printf 'Bash' ;; *.rb) printf 'Ruby' ;;
+        *.php) printf 'PHP' ;; *.lua) printf 'Lua' ;; *.swift) printf 'Swift' ;;
+        *.kt) printf 'Kotlin' ;; *.dart) printf 'Dart' ;; *.zig) printf 'Zig' ;;
+    esac
+}
+languages_list() {
+    printf '%b[LANGUAGES]%b %s\n' "$PURPLE" "$RESET" "$(ui 'Native toolchains and project engines' 'Инструменты языков и системы сборки')"
+    printf '%s\n' 'C / C++       gcc / g++, CMake, Make' 'Rust          rustc, Cargo' \
+        'Python        python3, pyproject.toml' 'Go            go, go.mod' \
+        'Java          javac / java, Maven / Gradle' 'JavaScript    node / npm' \
+        'TypeScript    tsc / node, npm scripts' 'C#            dotnet' \
+        'Bash          bash' 'Ruby          ruby' 'PHP           php' 'Lua           lua / luac' \
+        'Swift         swiftc / SwiftPM' 'Kotlin        kotlinc / java, Gradle' \
+        'Dart          dart' 'Zig           zig'
+}
+project_passport() {
+    local src language languages='' engine="${PROJECT_BUILDER:-files}" entry="${RUN_FILE:-${PROJECT_RUN:-}}"
+    case "$engine" in
+        cpp|cmake) languages='C / C++' ;; cargo) languages=Rust ;; python) languages=Python ;;
+        go) languages=Go ;; node) languages='JavaScript / TypeScript' ;; dotnet) languages='C#' ;;
+        maven|gradle) languages='Java / Kotlin' ;; swift) languages=Swift ;; zig) languages=Zig ;;
+    esac
+    for src in "${sources[@]}"; do
+        language=$(language_name "$src")
+        [[ -n "$language" && ", $languages, " != *", $language, "* ]] || continue
+        languages="${languages:+$languages, }$language"
+    done
+    printf '\n%b[SCAN COMPLETE]%b\n' "$BLUE" "$RESET"
+    printf '  %-10s › %s\n' "$(ui PROJECT ПРОЕКТ)" "${TARGET_DIR:-.}"
+    printf '  %-10s › %s\n' "$(ui LANGUAGES ЯЗЫКИ)" "${languages:-—}"
+    printf '  %-10s › %s\n' "$(ui ENGINE СБОРЩИК)" "$engine"
+    printf '  %-10s › %s\n' "$(ui TARGET ПЛАТФОРМА)" "$DISPLAY_TARGET"
+    printf '  %-10s › %s\n\n' "$(ui ENTRY ЗАПУСК)" "${entry:-$(ui 'select after build' 'выбор после сборки')}"
+}
+
+if [[ "$ACTION" == languages ]]; then languages_list; exit 0; fi
+
 if [[ -z "$ACTION" ]]; then
     if [[ -t 0 && -t 1 && -z "$BUILD_TARGET" ]]; then
         choose_menu "GHOSTNET — main menu (↑/↓ + Enter):" 2 \
@@ -326,13 +375,17 @@ if [[ -z "$ACTION" ]]; then
             "Install tools" \
             "Build a program" \
             "Full automatic build" \
-            "Exit"
+            "Exit" \
+            "$(ui 'Inspect project' 'Паспорт проекта')" \
+            "$(ui 'Supported languages' 'Поддерживаемые языки')"
         case "$MENU_SELECTED" in
             0) ACTION="check" ;;
             1) ACTION="install" ;;
             2) ACTION="build" ;;
             3) ACTION="auto" ;;
             4) exit 0 ;;
+            5) ACTION="inspect"; TARGET_DIR_PRESET="." ;;
+            6) languages_list; exit 0 ;;
         esac
     else
         ACTION="build"
@@ -340,9 +393,11 @@ if [[ -z "$ACTION" ]]; then
 fi
 
 case "$ACTION" in
-    check|install|build|auto|test) ;;
+    check|install|build|auto|test|inspect) ;;
     *) printf '[ERROR] Invalid mode: %s\n' "$ACTION" >&2; exit 2 ;;
 esac
+
+[[ "$ACTION" != inspect ]] || BUILD_TARGET="${BUILD_TARGET:-native}"
 
 if [[ -z "$BUILD_TARGET" || "$BUILD_TARGET" == "native" ]]; then
     if [[ "$BUILD_TARGET" == "native" ]]; then
@@ -521,6 +576,9 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
     fi
     [[ ${#sources[@]} -eq 0 ]] || has_py=1
 fi
+
+project_passport
+[[ "$ACTION" != inspect ]] || exit 0
 
 if [[ -z "$PROJECT_BUILDER" && ( "$ACTION" == "build" || "$ACTION" == "auto" ) ]]; then
     if [[ ${#sources[@]} -eq 0 ]]; then
