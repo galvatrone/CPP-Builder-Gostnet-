@@ -13,7 +13,7 @@ A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-
 **Linux / macOS — paste into Terminal:**
 
 ```bash
-bash -c 'f=$(mktemp) || exit; trap '\''rm -f "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f" && bash "$f"'
+bash -c 'f=$(mktemp -d) || exit; trap '\''rm -rf "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f/GHOSTNET-Install.sh" && bash "$f/GHOSTNET-Install.sh"'
 ```
 
 The installer detects the OS and installs missing Bash 4.4+, C++ compiler, Python, Rust/Cargo, CMake, Ninja and Make. Linux supports apt, dnf and pacman (sudo may be required). macOS uses Homebrew and installs it when missing; follow Apple's command line tools dialog if prompted, then rerun. Project-specific libraries and Python packages remain managed by your project.

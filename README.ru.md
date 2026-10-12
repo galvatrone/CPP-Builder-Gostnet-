@@ -13,7 +13,7 @@
 **Linux / macOS — вставьте в терминал:**
 
 ```bash
-bash -c 'f=$(mktemp) || exit; trap '\''rm -f "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f" && bash "$f"'
+bash -c 'f=$(mktemp -d) || exit; trap '\''rm -rf "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f/GHOSTNET-Install.sh" && bash "$f/GHOSTNET-Install.sh"'
 ```
 
 Установщик определяет ОС и устанавливает недостающие Bash 4.4+, компилятор C++, Python, Rust/Cargo, CMake, Ninja и Make. В Linux поддерживаются apt, dnf и pacman; может понадобиться sudo. В macOS используется Homebrew: если его нет, установщик предложит установку. Если появится окно инструментов Apple, завершите их установку и повторите команду. Библиотеки проекта и пакеты Python устанавливаются средствами самого проекта.
