@@ -134,9 +134,11 @@ jobs:
         \    $BadHash=(Get-FileHash -LiteralPath $Bad -Algorithm SHA256).Hash\n    Set-Content -LiteralPath $Sums -Value \"\
         $BadHash  ghostnet-windows.zip\"\n    $Rejected=$false\n    try { Install-Payload $Bad $Sums 'v1.1.1' $Root | Out-Null\
         \ } catch { $Rejected=$true }\n    Assert $Rejected 'Traversal ZIP was accepted'\n    Assert (!(Test-Path -LiteralPath\
-        \ (Join-Path $Root 'escaped.txt'))) 'ZIP wrote outside payload'\n    Write-Host 'PASS: checksum verification, staged\
-        \ payload, previous installation preservation and ZIP validation'\n} finally { Remove-Item -LiteralPath $Fixture -Recurse\
-        \ -Force }\n"
+        \ (Join-Path $Root 'escaped.txt'))) 'ZIP wrote outside payload'\n    Write-ActiveState $Root 'v1.1.0' $Installed 'C:\\\
+        msys64'\n    Write-ActiveState $Root 'v1.1.1' $Installed 'C:\\msys64'\n    Assert ((Get-Content -LiteralPath $State\
+        \ -Raw | ConvertFrom-Json).Version -eq 'v1.1.1') 'Repeated state replacement failed'\n    Write-Host 'PASS: checksum\
+        \ verification, staged payload, previous installation preservation and ZIP validation'\n} finally { Remove-Item -LiteralPath\
+        \ $Fixture -Recurse -Force }\n"
     - name: Install with fresh MSYS2 and exercise commands
       shell: powershell
       run: "$ErrorActionPreference = 'Stop'\n$Repo = (Get-Location).Path\n$Installer = Join-Path $Repo 'GHOSTNET-Install.cmd'\n\

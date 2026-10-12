@@ -172,7 +172,7 @@ public static class GhostnetEnvironment {
 function Write-ActiveState([string]$Root,[string]$Version,[string]$Payload,[string]$MsysRoot) {
     $State=Join-Path $Root 'installation.json';$Temp=Join-Path $Root ('state-'+[guid]::NewGuid()+'.json')
     @{Version=$Version;Payload=$Payload;MsysRoot=$MsysRoot} | ConvertTo-Json | Set-Content -LiteralPath $Temp -Encoding UTF8
-    if (Test-Path -LiteralPath $State) { [IO.File]::Replace($Temp,$State,$null) } else { [IO.File]::Move($Temp,$State) }
+    if (Test-Path -LiteralPath $State) { [IO.File]::Replace($Temp,$State,[NullString]::Value) } else { [IO.File]::Move($Temp,$State) }
 }
 # Main: downloads and installation require the user's initial confirmation.
 $Work=$null;$Lock=$null
