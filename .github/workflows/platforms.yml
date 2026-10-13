@@ -367,7 +367,10 @@ jobs:
         \   while marker not in data:\n    assert time.monotonic()<deadline,data.decode(errors='replace')\n    if\
         \ select.select([master],[],[],.1)[0]:data+=os.read(master,65536)\n   assert b'SYSTEM ONLINE' in data and\
         \ b'Loading:' in data\n   assert b'\\x1b[38;2;0;255;65m' in data\n   os.write(master,b'\\x1b[B\\x1b[B\\\
-        r');assert p.wait(timeout=5)==0\n  finally:\n   if p.poll() is None:p.kill();p.wait()\n   os.close(master)\n\
+        r')\n   # Drain redraws: macOS PTY buffers can fill while waiting for exit.\n   deadline=time.monotonic()+15\n\
+        \   while p.poll() is None:\n    assert time.monotonic()<deadline,data.decode(errors='replace')\n    if\
+        \ select.select([master],[],[],.1)[0]:\n     try:data+=os.read(master,65536)\n     except OSError:break\n\
+        \   assert p.wait(timeout=2)==0\n  finally:\n   if p.poll() is None:p.kill();p.wait()\n   os.close(master)\n\
         print('PASS: source hardlink preservation, non-overwrite init, original animated menu and exit navigation')\n\
         PYCONTRACT\n"
 'on':
