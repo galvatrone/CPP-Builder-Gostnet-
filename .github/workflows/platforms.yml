@@ -107,7 +107,7 @@ jobs:
           self.env=dict(os.environ, BAN_NO_ANIMATION="1", HOME=str(self.p/"home"), XDG_STATE_HOME=str(self.p/"state"), PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
          def tearDown(self): self.tmp.cleanup()
          def call(self, script, action, *args):
-          return subprocess.run([BASH,str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
+          return subprocess.run([BASH,str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,encoding="utf-8",capture_output=True,timeout=60)
          def test_doctor_reports_python_and_missing_environment_without_writing(self):
           (self.p/"app.py").write_text("print('ok')")
           (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
@@ -149,14 +149,14 @@ jobs:
             try:
              deadline=time.monotonic()+10
              while not (self.p/"seen-one").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
-             self.assertTrue((self.p/"seen-one").exists(),log.read_text())
+             self.assertTrue((self.p/"seen-one").exists(),log.read_text(encoding="utf-8"))
              app.write_text("from pathlib import Path; Path('seen-two').touch()")
              deadline=time.monotonic()+10
              while not (self.p/"seen-two").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
-             self.assertTrue((self.p/"seen-two").exists(),log.read_text())
-             time.sleep(.8); before=log.read_text().count('[WATCH]')
+             self.assertTrue((self.p/"seen-two").exists(),log.read_text(encoding="utf-8"))
+             time.sleep(.8); before=log.read_text(encoding="utf-8").count('[WATCH]')
              (self.p/".venv").mkdir(exist_ok=True); (self.p/".venv/ignored.py").write_text('bad python')
-             time.sleep(.8); self.assertEqual(log.read_text().count('[WATCH]'),before)
+             time.sleep(.8); self.assertEqual(log.read_text(encoding="utf-8").count('[WATCH]'),before)
             finally:
              if proc.poll() is None:
               if os.name == 'nt': subprocess.run(['taskkill.exe','/PID',str(proc.pid),'/T','/F'],capture_output=True)
@@ -204,14 +204,14 @@ jobs:
          def test_completion_output_and_installed_manual(self):
           for script in ('ban.sh','ban-ru.sh'):
            for shell in ('bash','zsh','powershell'):
-            r=subprocess.run([BASH,str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
+            r=subprocess.run([BASH,str(ROOT/script),'completion',shell],capture_output=True,text=True,encoding="utf-8",env=self.env)
             self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertNotIn('[SCAN',r.stdout); self.assertIn('doctor',r.stdout); self.assertIn('setup',r.stdout)
-           r=subprocess.run([BASH,str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,str(ROOT/script),'completion','bash'],capture_output=True,text=True,encoding="utf-8",env=self.env)
            completion=self.p/'completion.sh'; completion.write_text(r.stdout)
-           r=subprocess.run([BASH,'-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,'-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,encoding="utf-8",env=self.env)
            self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('doctor',r.stdout)
           prefix=self.p/'installed'
-          r=subprocess.run([BASH,str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
+          r=subprocess.run([BASH,str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,encoding="utf-8",env=self.env)
           self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((prefix/'share/man/man1/ghostnet.1').exists())
           self.assertTrue((prefix/'share/bash-completion/completions/ghostnet').exists())
          def test_setup_requirements_with_nested_python_sources(self):
@@ -263,7 +263,7 @@ jobs:
           (self.p/'main.cpp').write_text('int main(){}'); alias=self.p/'alias'; alias.symlink_to(self.p,target_is_directory=True)
           for script in ('ban.sh','ban-ru.sh'):
            for action in ('build','clean'):
-            r=subprocess.run([BASH,str(ROOT/script),action,'--target','native',str(alias)],env=self.env,text=True,capture_output=True,timeout=30)
+            r=subprocess.run([BASH,str(ROOT/script),action,'--target','native',str(alias)],env=self.env,text=True,encoding="utf-8",capture_output=True,timeout=30)
             self.assertEqual(r.returncode,0,r.stdout+r.stderr)
            self.assertFalse((self.p/'main').exists()); self.assertTrue((self.p/'main.cpp').exists())
          @unittest.skipIf(os.name=='nt' or platform.system()=='Darwin','Linux cross target contract')
@@ -271,7 +271,7 @@ jobs:
           import signal
           (self.p/'main.cpp').write_text('int main(){}')
           for script in ('ban.sh','ban-ru.sh'):
-           proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--target','windows',str(self.p)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+           proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--target','windows',str(self.p)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",start_new_session=True)
            try:
             try: out,err=proc.communicate(timeout=3)
             except subprocess.TimeoutExpired: self.fail('watch ignored the requested cross target and started a native build')
@@ -304,7 +304,7 @@ jobs:
           (self.mocks/'systemctl').write_text('#!/bin/bash\nexit 0\n');(self.mocks/'systemctl').chmod(0o755)
           self.env=dict(os.environ,HOME=str(self.p/'home'),XDG_STATE_HOME=str(self.p/'state'),XDG_CONFIG_HOME=str(self.p/'home/.config'),FIXTURE=str(self.p),PATH=str(self.mocks)+':'+os.environ['PATH'])
          def tearDown(self):self.tmp.cleanup()
-         def call(self,*args):return subprocess.run(['python3',str(ROOT/'tools/ghostnet-update.py'),'--root',str(self.prefix),*args],env=self.env,text=True,capture_output=True,timeout=20)
+         def call(self,*args):return subprocess.run(['python3',str(ROOT/'tools/ghostnet-update.py'),'--root',str(self.prefix),*args],env=self.env,text=True,encoding="utf-8",capture_output=True,timeout=20)
          def test_verified_update_switches_complete_payload(self):
           r=self.call('update');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
           state=json.loads((self.share/'active.json').read_text());payload=pathlib.Path(state['Payload']);self.assertEqual((payload/'ban.sh').read_text(),'#!/bin/bash\necho NEW');self.assertEqual(state['Version'],'v9.0.0');self.assertEqual((self.share/'ban.sh').read_text(),'OLD')
@@ -403,7 +403,7 @@ jobs:
           self.env=dict(os.environ, BAN_NO_ANIMATION="1", HOME=str(self.p/"home"), XDG_STATE_HOME=str(self.p/"state"), PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
          def tearDown(self): self.tmp.cleanup()
          def call(self, script, action, *args):
-          return subprocess.run([BASH,str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
+          return subprocess.run([BASH,str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,encoding="utf-8",capture_output=True,timeout=60)
          def test_doctor_reports_python_and_missing_environment_without_writing(self):
           (self.p/"app.py").write_text("print('ok')")
           (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
@@ -445,14 +445,14 @@ jobs:
             try:
              deadline=time.monotonic()+10
              while not (self.p/"seen-one").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
-             self.assertTrue((self.p/"seen-one").exists(),log.read_text())
+             self.assertTrue((self.p/"seen-one").exists(),log.read_text(encoding="utf-8"))
              app.write_text("from pathlib import Path; Path('seen-two').touch()")
              deadline=time.monotonic()+10
              while not (self.p/"seen-two").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
-             self.assertTrue((self.p/"seen-two").exists(),log.read_text())
-             time.sleep(.8); before=log.read_text().count('[WATCH]')
+             self.assertTrue((self.p/"seen-two").exists(),log.read_text(encoding="utf-8"))
+             time.sleep(.8); before=log.read_text(encoding="utf-8").count('[WATCH]')
              (self.p/".venv").mkdir(exist_ok=True); (self.p/".venv/ignored.py").write_text('bad python')
-             time.sleep(.8); self.assertEqual(log.read_text().count('[WATCH]'),before)
+             time.sleep(.8); self.assertEqual(log.read_text(encoding="utf-8").count('[WATCH]'),before)
             finally:
              if proc.poll() is None:
               if os.name == 'nt': subprocess.run(['taskkill.exe','/PID',str(proc.pid),'/T','/F'],capture_output=True)
@@ -500,14 +500,14 @@ jobs:
          def test_completion_output_and_installed_manual(self):
           for script in ('ban.sh','ban-ru.sh'):
            for shell in ('bash','zsh','powershell'):
-            r=subprocess.run([BASH,str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
+            r=subprocess.run([BASH,str(ROOT/script),'completion',shell],capture_output=True,text=True,encoding="utf-8",env=self.env)
             self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertNotIn('[SCAN',r.stdout); self.assertIn('doctor',r.stdout); self.assertIn('setup',r.stdout)
-           r=subprocess.run([BASH,str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,str(ROOT/script),'completion','bash'],capture_output=True,text=True,encoding="utf-8",env=self.env)
            completion=self.p/'completion.sh'; completion.write_text(r.stdout)
-           r=subprocess.run([BASH,'-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,'-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,encoding="utf-8",env=self.env)
            self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('doctor',r.stdout)
           prefix=self.p/'installed'
-          r=subprocess.run([BASH,str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
+          r=subprocess.run([BASH,str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,encoding="utf-8",env=self.env)
           self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((prefix/'share/man/man1/ghostnet.1').exists())
           self.assertTrue((prefix/'share/bash-completion/completions/ghostnet').exists())
          def test_setup_requirements_with_nested_python_sources(self):
@@ -559,7 +559,7 @@ jobs:
           (self.p/'main.cpp').write_text('int main(){}'); alias=self.p/'alias'; alias.symlink_to(self.p,target_is_directory=True)
           for script in ('ban.sh','ban-ru.sh'):
            for action in ('build','clean'):
-            r=subprocess.run([BASH,str(ROOT/script),action,'--target','native',str(alias)],env=self.env,text=True,capture_output=True,timeout=30)
+            r=subprocess.run([BASH,str(ROOT/script),action,'--target','native',str(alias)],env=self.env,text=True,encoding="utf-8",capture_output=True,timeout=30)
             self.assertEqual(r.returncode,0,r.stdout+r.stderr)
            self.assertFalse((self.p/'main').exists()); self.assertTrue((self.p/'main.cpp').exists())
          @unittest.skipIf(os.name=='nt' or platform.system()=='Darwin','Linux cross target contract')
@@ -567,7 +567,7 @@ jobs:
           import signal
           (self.p/'main.cpp').write_text('int main(){}')
           for script in ('ban.sh','ban-ru.sh'):
-           proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--target','windows',str(self.p)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+           proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--target','windows',str(self.p)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",start_new_session=True)
            try:
             try: out,err=proc.communicate(timeout=3)
             except subprocess.TimeoutExpired: self.fail('watch ignored the requested cross target and started a native build')
