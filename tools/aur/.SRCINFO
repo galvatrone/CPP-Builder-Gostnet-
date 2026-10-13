@@ -1,6 +1,6 @@
 pkgbase = ghostnet
 	pkgdesc = Terminal launcher for native builds, project tools and 17 languages
-	pkgver = 1.4.0
+	pkgver = 1.4.1
 	pkgrel = 1
 	url = https://github.com/galvatrone/CPP-Builder-Gostnet-
 	arch = any
@@ -29,7 +29,7 @@ pkgbase = ghostnet
 	optdepends = ninja: CMake backend
 	optdepends = make: Make projects
 	optdepends = mingw-w64-gcc: Windows cross compilation
-	source = ghostnet-1.4.0.zip::https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/download/v1.4.0/ghostnet-linux.zip
-	sha256sums = f63abd3c25a9d8f1a1402d5dc44c508c1bbfe89484842e6af5c263fff502e945
+	source = ghostnet-1.4.1.zip::https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/download/v1.4.1/ghostnet-linux.zip
+	sha256sums = acec7ae78afb5fe122e15eecf50122df422d7e27d09b53f0acc1b8598e9a679b
 
 pkgname = ghostnet

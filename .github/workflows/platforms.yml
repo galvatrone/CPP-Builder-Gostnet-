@@ -81,7 +81,7 @@ jobs:
 
         [[ $(command -v ghostnet) -ef "$fixture/local tools/bin/ghostnet" ]]
 
-        ghostnet --version | grep ''1.4.0''
+        ghostnet --version | grep ''1.4.1''
 
         printf ''#include <iostream>\nint main(){std::cout<<"BOOTSTRAP_OK";}\n'' > "$fixture/main.cpp"
 
@@ -180,7 +180,7 @@ jobs:
           for script in ("ban.sh","ban-ru.sh"):
            r=self.call(script,"build"); self.assertNotEqual(r.returncode,0)
            reports=list((self.p/"state/ghostnet/reports").glob('error.*')); self.assertTrue(reports,r.stdout+r.stderr)
-           text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.0',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
+           text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.1',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
          def test_setup_installs_local_wheel_and_run_imports_package(self):
           import zipfile
           wheel=self.p/'ghostnet_probe-1.0-py3-none-any.whl'
@@ -477,7 +477,7 @@ jobs:
           for script in ("ban.sh","ban-ru.sh"):
            r=self.call(script,"build"); self.assertNotEqual(r.returncode,0)
            reports=list((self.p/"state/ghostnet/reports").glob('error.*')); self.assertTrue(reports,r.stdout+r.stderr)
-           text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.0',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
+           text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.1',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
          def test_setup_installs_local_wheel_and_run_imports_package(self):
           import zipfile
           wheel=self.p/'ghostnet_probe-1.0-py3-none-any.whl'
@@ -680,12 +680,12 @@ jobs:
                 Copy-Item -LiteralPath (Join-Path $Repo "tools/$Name") -Destination $Payload
             }
             Copy-Item -LiteralPath (Join-Path $Repo 'tools/ghostnet-update.py') -Destination $Root
-            Write-ActiveState $Root 'v1.4.0' $Payload $env:MSYS2_ROOT
+            Write-ActiveState $Root 'v1.4.1' $Payload $env:MSYS2_ROOT
             Write-Bridges $Root
             $Command=Join-Path $Root 'bin\ghostnet.cmd'
             $RuCommand=Join-Path $Root 'bin\ghostnet-ru.cmd'
             $Output=& $Command --version
-            Assert ($LASTEXITCODE -eq 0 -and "$Output" -match '1.4.0') 'New installed bridge cannot launch payload'
+            Assert ($LASTEXITCODE -eq 0 -and "$Output" -match '1.4.1') 'New installed bridge cannot launch payload'
             & $RuCommand completion powershell | Out-Null
             Assert ($LASTEXITCODE -eq 0) 'Completion forwarding failed'
             $CompletionText=Get-Content -LiteralPath tools/ghostnet.ps1 -Raw

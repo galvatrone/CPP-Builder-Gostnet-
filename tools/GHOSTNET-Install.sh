@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs on macOS system Bash 3.2 before modern Bash is installed.
 set -euo pipefail
-VERSION=v1.4.0
+VERSION=v1.4.1
 REPOSITORY=https://github.com/galvatrone/CPP-Builder-Gostnet-
 prefix="${HOME}/.local"
 yes=0; launch=1; remote=0

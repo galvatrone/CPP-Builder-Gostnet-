@@ -47,7 +47,7 @@ Run without arguments for the arrow-key menu (↑/↓, ←/→ and Enter).
   --run              Run the program after a successful build
   --yes              Allow package installation without another confirmation
   --no-animation     Disable animations
-  --version          GHOSTNET 1.4.0
+  --version          GHOSTNET 1.4.1
   --help             Show help
 
 Example: bash ban.sh --auto --target linux --run ./project
@@ -95,7 +95,7 @@ while [[ $# -gt 0 ]]; do
         --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         --yes) ASSUME_YES=1 ;;
         --no-animation) BAN_NO_ANIMATION=1 ;;
-        --version) printf 'GHOSTNET 1.4.0\n'; exit 0 ;;
+        --version) printf 'GHOSTNET 1.4.1\n'; exit 0 ;;
         --help|-h) usage; exit 0 ;;
         --)
             shift
@@ -281,7 +281,7 @@ save_error_report() {
     (umask 077; mkdir -p -- "$folder") 2>/dev/null || return 0
     report=$(umask 077; mktemp "$folder/error.XXXXXX") || return 0
     {
-        printf 'GHOSTNET 1.4.0\nHost: %s\nProject: %s\nOperation: %s\nExit: %s\nCommand: ' "$HOST_SYSTEM" "$TARGET_DIR" "$label" "$status"
+        printf 'GHOSTNET 1.4.1\nHost: %s\nProject: %s\nOperation: %s\nExit: %s\nCommand: ' "$HOST_SYSTEM" "$TARGET_DIR" "$label" "$status"
         printf '%q ' "$@"; printf '\n\nTools:\n'
         for tool in "${required_compilers[@]}"; do
             command -v "$tool" || continue

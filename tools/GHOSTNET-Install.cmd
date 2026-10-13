@@ -4,7 +4,7 @@ set "GHOSTNET_INSTALLER=%~f0"
 set "GHOSTNET_YES=0"
 set "GHOSTNET_NO_LAUNCH=0"
 set "GHOSTNET_UPDATE=0"
-set "GHOSTNET_VERSION=v1.4.0"
+set "GHOSTNET_VERSION=v1.4.1"
 set "GHOSTNET_APP_DIR=%LOCALAPPDATA%\GHOSTNET"
 :parse
 if "%~1"=="" goto execute
@@ -243,7 +243,9 @@ try {
     if (Test-Path -LiteralPath $HelperSource) {
         Copy-Item -LiteralPath $HelperSource -Destination (Join-Path $Root 'ghostnet-update.py') -Force
         if ($env:GHOSTNET_SKIP_SCHEDULE -ne '1') {
-            & (Join-Path $Msys 'ucrt64\bin\python.exe') (Join-Path $Root 'ghostnet-update.py') --root $Root auto-update enable | Out-Host
+            $Python=Join-Path $Msys 'ucrt64\bin\python.exe'
+            if (!(Test-Path -LiteralPath $Python)) { $Python=(Get-Command python.exe -ErrorAction Stop).Source }
+            & $Python (Join-Path $Root 'ghostnet-update.py') --root $Root auto-update enable | Out-Host
         }
     }
     Write-Host "Installed $Version. Open a new terminal and run ghostnet or ghostnet-ru."
