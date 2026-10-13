@@ -346,10 +346,30 @@ jobs:
         \ class Main {public static void main(String[] a){System.out.println(\"GRADLE_OK\");}}')\n (g/'settings.gradle').write_text(\"\
         rootProject.name='demo'\")\n (g/'build.gradle').write_text(\"plugins { id 'java' }; jar { manifest { attributes\
         \ 'Main-Class': 'Main' } }\")\n z=p/'zig';z.mkdir()\n subprocess.run(['zig','init'],cwd=z,check=True,env=env)\n\
-        \ (z/'src/main.zig').write_text('const std=@import(\"std\"); pub fn main() void {std.debug.print(\"ZIG_PROJECT_OK\\\
-        n\", .{});}')\n for script in ('ban.sh','ban-ru.sh'):\n  assert 'MAVEN_OK' in call(script,'run','--run-file','target/app-1.0.jar',m)\n\
+        \ (z/'src/main.zig').write_text('const std=@import(\"std\"); pub fn main() void {std.debug.print(\"ZIG_PROJECT_OK\"\
+        , .{});}')\n for script in ('ban.sh','ban-ru.sh'):\n  assert 'MAVEN_OK' in call(script,'run','--run-file','target/app-1.0.jar',m)\n\
         \  call(script,'test',m)\n  assert 'GRADLE_OK' in call(script,'run','--run-file','build/libs/demo.jar',g)\n\
         \  call(script,'test',g)\n  assert 'ZIG_PROJECT_OK' in call(script,'run',z)\n  call(script,'test',z)\nPYPROJECT\n"
+    - name: Source preservation and original terminal contract
+      if: runner.os != 'Windows'
+      shell: bash
+      run: "python3 - <<'PYCONTRACT'\nimport os,pathlib,platform,pty,select,subprocess,tempfile,time\nroot=pathlib.Path.cwd()\n\
+        with tempfile.TemporaryDirectory(prefix='ghostnet contracts ') as folder:\n base=pathlib.Path(folder);env=dict(os.environ,BAN_NO_ANIMATION='1',HOME=str(base/'home'),XDG_STATE_HOME=str(base/'state'))\n\
+        \ host='macos' if platform.system()=='Darwin' else 'linux'\n for script in ('ban.sh','ban-ru.sh'):\n  for\
+        \ language,source,output,code in [('java','Main.java','Main.class','public class Main {}'),('typescript','main.ts','main.js','const\
+        \ value: string = \"KEEP\";')]:\n   project=base/(script+' '+language);project.mkdir();original=project/source;original.write_text(code)\n\
+        \   generated=project/'.ghostnet-build'/host/language/'0';generated.mkdir(parents=True)\n   os.link(original,generated/output)\n\
+        \   r=subprocess.run(['bash',str(root/script),'build',str(project)],env=env,capture_output=True,text=True)\n\
+        \   assert r.returncode!=0,(r.stdout+r.stderr)\n   assert original.read_text()==code\n  target=base/(script+'\
+        \ keep');target.mkdir();(target/'keep.txt').write_text('KEEP')\n  r=subprocess.run(['bash',str(root/script),'init','--type','cpp',str(target)],env=env,capture_output=True)\n\
+        \  assert r.returncode!=0 and (target/'keep.txt').read_text()=='KEEP'\n  master,slave=pty.openpty();p=subprocess.Popen(['bash',str(root/script)],env=dict(env,BAN_NO_ANIMATION='0',TERM='xterm-256color'),stdin=slave,stdout=slave,stderr=slave);os.close(slave)\n\
+        \  data=b'';marker=b'Exit' if script=='ban.sh' else 'Выход'.encode();deadline=time.monotonic()+15\n  try:\n\
+        \   while marker not in data:\n    assert time.monotonic()<deadline,data.decode(errors='replace')\n    if\
+        \ select.select([master],[],[],.1)[0]:data+=os.read(master,65536)\n   assert b'SYSTEM ONLINE' in data and\
+        \ b'Loading:' in data\n   assert b'\\x1b[38;2;0;255;65m' in data\n   os.write(master,b'\\x1b[B\\x1b[B\\\
+        r');assert p.wait(timeout=5)==0\n  finally:\n   if p.poll() is None:p.kill();p.wait()\n   os.close(master)\n\
+        print('PASS: source hardlink preservation, non-overwrite init, original animated menu and exit navigation')\n\
+        PYCONTRACT\n"
 'on':
   push: null
   pull_request: null

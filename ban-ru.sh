@@ -387,8 +387,8 @@ generated_directory() {
         path+="/$component"
         [[ ! -L "$path" ]] || { printf '[ERROR] Generated directory must not be a symlink: %s\n' "$path" >&2; return 1; }
     done
-    if [[ -d "$path" ]] && IFS= read -r -d '' component < <(find "$path" -type l -print0 -quit); then
-        printf '[ERROR] %s: %s\n' "$(ui 'Symlink in generated output' 'Символическая ссылка в выходной папке')" "$component" >&2
+    if [[ -d "$path" ]] && IFS= read -r -d '' component < <(find "$path" \( -type l -o -type f -links +1 \) -print0 -quit); then
+        printf '[ERROR] %s: %s\n' "$(ui 'Symlink or hardlink in generated output' 'Символическая или жёсткая ссылка в выходной папке')" "$component" >&2
         return 1
     fi
     mkdir -p -- "$path" || return 1
@@ -689,7 +689,7 @@ init_project() {
     local kinds=(cpp cmake c rust python go java javascript typescript csharp bash ruby php lua swift kotlin dart zig)
     if [[ -z "$kind" ]]; then
         choose_menu "$(ui 'Create project (↑/↓ + Enter):' 'Создать проект (↑/↓ + Enter):')" 0 \
-            'C++ single file' 'C++ CMake' 'C single file' 'Rust / Cargo' 'Python' 'Go' 'Java' \
+            "$(ui 'C++ single file' 'C++ — отдельный файл')" 'C++ CMake' "$(ui 'C single file' 'C — отдельный файл')" 'Rust / Cargo' 'Python' 'Go' 'Java' \
             'JavaScript / Node' 'TypeScript / Node' 'C# / .NET' 'Bash' 'Ruby' 'PHP' 'Lua' 'Swift / SwiftPM' 'Kotlin' 'Dart' 'Zig'
         kind="${kinds[$MENU_SELECTED]}"
     fi
