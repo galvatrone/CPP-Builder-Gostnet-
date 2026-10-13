@@ -30,6 +30,6 @@ pkgbase = ghostnet
 	optdepends = make: Make projects
 	optdepends = mingw-w64-gcc: Windows cross compilation
 	source = ghostnet-1.4.0.zip::https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/download/v1.4.0/ghostnet-linux.zip
-	sha256sums = c54df180613b9bf6729a0b97bb2c20fe5319e10edb0d276138fad68d0b57f421
+	sha256sums = ccf02e26bc6eba1ffa2715f0cc01726620636182bca48b84709ff3619b513d3a
 
 pkgname = ghostnet

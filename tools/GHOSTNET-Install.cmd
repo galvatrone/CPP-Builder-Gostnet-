@@ -149,14 +149,16 @@ $Bash=Join-Path $State.MsysRoot 'usr\bin\bash.exe'
 if (!(Test-Path -LiteralPath $Bash)) { Write-Error 'MSYS2 is missing. Run GHOSTNET-Install.cmd again.'; exit 1 }
 $env:MSYS2_PATH_TYPE='inherit';$env:MSYSTEM='UCRT64';$env:CHERE_INVOKING='1'
 $Helper=Join-Path $Root 'ghostnet-update.py'
+$Python=Join-Path $State.MsysRoot 'ucrt64\bin\python.exe'
+if (!(Test-Path -LiteralPath $Python)) { $Python=(Get-Command python.exe -ErrorAction Stop).Source }
 if (Test-Path -LiteralPath $Helper) {
     $env:GHOSTNET_ROOT=$Root; $env:GHOSTNET_UPDATE_HELPER=$Helper
     if ($ForwardedArgs.Count -gt 0 -and $ForwardedArgs[0] -in @('update','auto-update')) {
-        & $Bash --login -c 'exec python "$@"' ghostnet-updater $Helper --root $Root @ForwardedArgs
+        & $Python $Helper --root $Root @ForwardedArgs
         exit $LASTEXITCODE
     }
-    if ($ForwardedArgs.Count -eq 0 -or $ForwardedArgs[0] -notin @('--version','--help','-h')) {
-        & $Bash --login -c 'exec python "$@"' ghostnet-updater $Helper --root $Root --startup 2>$null | Out-Null
+    if ($ForwardedArgs.Count -eq 0 -or $ForwardedArgs[0] -notin @('--version','--help','-h','completion')) {
+        & $Python $Helper --root $Root --startup 2>$null | Out-Null
         $State=Get-Content -LiteralPath (Join-Path $Root 'installation.json') -Raw | ConvertFrom-Json
     }
 }
@@ -241,7 +243,7 @@ try {
     if (Test-Path -LiteralPath $HelperSource) {
         Copy-Item -LiteralPath $HelperSource -Destination (Join-Path $Root 'ghostnet-update.py') -Force
         if ($env:GHOSTNET_SKIP_SCHEDULE -ne '1') {
-            & (Join-Path $Msys 'usr\bin\bash.exe') --login -c 'exec python "$@"' ghostnet-updater (Join-Path $Root 'ghostnet-update.py') --root $Root auto-update enable | Out-Host
+            & (Join-Path $Msys 'ucrt64\bin\python.exe') (Join-Path $Root 'ghostnet-update.py') --root $Root auto-update enable | Out-Host
         }
     }
     Write-Host "Installed $Version. Open a new terminal and run ghostnet or ghostnet-ru."

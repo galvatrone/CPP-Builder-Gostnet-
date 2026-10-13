@@ -97,16 +97,17 @@ jobs:
     - name: Project environment, watch, clean and shell help
       run: |
         python3 - <<'PYLIFECYCLE'
-        import os, subprocess, tempfile, unittest
+        import os, subprocess, tempfile, unittest, shutil, platform
         from pathlib import Path
         ROOT=Path.cwd()
+        BASH=os.environ.get("GHOSTNET_TEST_BASH",shutil.which("bash"))
         class LifecycleTests(unittest.TestCase):
          def setUp(self):
-          self.tmp=tempfile.TemporaryDirectory(prefix="ghostnet lifecycle "); self.p=Path(self.tmp.name)
+          self.tmp=tempfile.TemporaryDirectory(prefix="ghostnet lifecycle "); self.p=Path(self.tmp.name).resolve()
           self.env=dict(os.environ, BAN_NO_ANIMATION="1", HOME=str(self.p/"home"), XDG_STATE_HOME=str(self.p/"state"), PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
          def tearDown(self): self.tmp.cleanup()
          def call(self, script, action, *args):
-          return subprocess.run(["bash",str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
+          return subprocess.run([BASH,str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
          def test_doctor_reports_python_and_missing_environment_without_writing(self):
           (self.p/"app.py").write_text("print('ok')")
           (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
@@ -144,7 +145,7 @@ jobs:
            app.write_text("from pathlib import Path; Path('seen-one').touch()")
            log=self.p/"watch.log"
            with log.open('w') as output:
-            proc=subprocess.Popen(['bash',str(ROOT/script),'watch','--no-animation',str(self.p)],env=self.env,stdout=output,stderr=output,start_new_session=(os.name != "nt"))
+            proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--no-animation',str(self.p)],env=self.env,stdout=output,stderr=output,start_new_session=(os.name != "nt"))
             try:
              deadline=time.monotonic()+10
              while not (self.p/"seen-one").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
@@ -177,7 +178,7 @@ jobs:
           (self.p/"main.cpp").write_text('not valid C++')
           for script in ("ban.sh","ban-ru.sh"):
            r=self.call(script,"build"); self.assertNotEqual(r.returncode,0)
-           reports=list((self.p/"state/ghostnet/reports").glob('*.log')); self.assertTrue(reports,r.stdout+r.stderr)
+           reports=list((self.p/"state/ghostnet/reports").glob('error.*')); self.assertTrue(reports,r.stdout+r.stderr)
            text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.0',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
          def test_setup_installs_local_wheel_and_run_imports_package(self):
           import zipfile
@@ -203,14 +204,14 @@ jobs:
          def test_completion_output_and_installed_manual(self):
           for script in ('ban.sh','ban-ru.sh'):
            for shell in ('bash','zsh','powershell'):
-            r=subprocess.run(['bash',str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
+            r=subprocess.run([BASH,str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
             self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertNotIn('[SCAN',r.stdout); self.assertIn('doctor',r.stdout); self.assertIn('setup',r.stdout)
-           r=subprocess.run(['bash',str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
            completion=self.p/'completion.sh'; completion.write_text(r.stdout)
-           r=subprocess.run(['bash','-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,'-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
            self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('doctor',r.stdout)
           prefix=self.p/'installed'
-          r=subprocess.run(['bash',str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
+          r=subprocess.run([BASH,str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
           self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((prefix/'share/man/man1/ghostnet.1').exists())
           self.assertTrue((prefix/'share/bash-completion/completions/ghostnet').exists())
          def test_setup_requirements_with_nested_python_sources(self):
@@ -228,7 +229,7 @@ jobs:
           for script in ('ban.sh','ban-ru.sh'):
            (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=first\n')
            r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
-           first=self.p/'.ghostnet-build'/('windows' if os.name=='nt' else 'linux')/('first.exe' if os.name=='nt' else 'first'); first.write_text('user replacement')
+           first=self.p/'.ghostnet-build'/('windows' if os.name=='nt' else ('macos' if platform.system()=='Darwin' else 'linux'))/('first.exe' if os.name=='nt' else 'first'); first.write_text('user replacement')
            (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=second\n')
            r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
            r=self.call(script,'clean'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue(first.exists(),r.stdout+r.stderr); self.assertEqual(first.read_text(),'user replacement')
@@ -245,7 +246,7 @@ jobs:
           for script in ('ban.sh','ban-ru.sh'):
            marker=self.p/'descendant.pid'; marker.unlink(missing_ok=True); pid=None
            with (self.p/'orphan.log').open('w') as out:
-            proc=subprocess.Popen(['bash',str(ROOT/script),'watch',str(self.p)],env=self.env,stdout=out,stderr=out,start_new_session=True)
+            proc=subprocess.Popen([BASH,str(ROOT/script),'watch',str(self.p)],env=self.env,stdout=out,stderr=out,start_new_session=True)
             try:
              deadline=time.monotonic()+10
              while not marker.exists() and proc.poll() is None and time.monotonic()<deadline:time.sleep(.1)
@@ -257,6 +258,26 @@ jobs:
             finally:
              if proc.poll() is None: os.killpg(proc.pid,signal.SIGKILL);proc.wait()
              if pid and alive(pid): os.kill(pid,signal.SIGKILL)
+         @unittest.skipIf(os.name=='nt','Unix directory alias contract')
+         def test_clean_handles_project_directory_alias(self):
+          (self.p/'main.cpp').write_text('int main(){}'); alias=self.p/'alias'; alias.symlink_to(self.p,target_is_directory=True)
+          for script in ('ban.sh','ban-ru.sh'):
+           for action in ('build','clean'):
+            r=subprocess.run([BASH,str(ROOT/script),action,'--target','native',str(alias)],env=self.env,text=True,capture_output=True,timeout=30)
+            self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           self.assertFalse((self.p/'main').exists()); self.assertTrue((self.p/'main.cpp').exists())
+         @unittest.skipIf(os.name=='nt' or platform.system()=='Darwin','Linux cross target contract')
+         def test_watch_rejects_cross_target_before_build(self):
+          import signal
+          (self.p/'main.cpp').write_text('int main(){}')
+          for script in ('ban.sh','ban-ru.sh'):
+           proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--target','windows',str(self.p)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+           try:
+            try: out,err=proc.communicate(timeout=3)
+            except subprocess.TimeoutExpired: self.fail('watch ignored the requested cross target and started a native build')
+            self.assertNotEqual(proc.returncode,0,out+err); self.assertIn('native',out+err); self.assertFalse((self.p/'main').exists())
+           finally:
+            if proc.poll() is None: os.killpg(proc.pid,signal.SIGTERM); proc.communicate(timeout=5)
         if __name__=="__main__": unittest.main()
         PYLIFECYCLE
     - name: Verified updater failure and atomic activation contracts
@@ -281,7 +302,7 @@ jobs:
         shutil.copyfile(os.environ['FIXTURE']+'/'+name,args[args.index('--output')+1])
         ''');(self.mocks/'curl').chmod(0o755)
           (self.mocks/'systemctl').write_text('#!/bin/bash\nexit 0\n');(self.mocks/'systemctl').chmod(0o755)
-          self.env=dict(os.environ,HOME=str(self.p/'home'),XDG_STATE_HOME=str(self.p/'state'),FIXTURE=str(self.p),PATH=str(self.mocks)+':'+os.environ['PATH'])
+          self.env=dict(os.environ,HOME=str(self.p/'home'),XDG_STATE_HOME=str(self.p/'state'),XDG_CONFIG_HOME=str(self.p/'home/.config'),FIXTURE=str(self.p),PATH=str(self.mocks)+':'+os.environ['PATH'])
          def tearDown(self):self.tmp.cleanup()
          def call(self,*args):return subprocess.run(['python3',str(ROOT/'tools/ghostnet-update.py'),'--root',str(self.prefix),*args],env=self.env,text=True,capture_output=True,timeout=20)
          def test_verified_update_switches_complete_payload(self):
@@ -370,17 +391,19 @@ jobs:
     - name: Project environment, watch, clean and shell help
       shell: msys2 {0}
       run: |
+        export GHOSTNET_TEST_BASH="$(cygpath -w "$(command -v bash)")"
         python - <<'PYLIFECYCLE'
-        import os, subprocess, tempfile, unittest
+        import os, subprocess, tempfile, unittest, shutil, platform
         from pathlib import Path
         ROOT=Path.cwd()
+        BASH=os.environ.get("GHOSTNET_TEST_BASH",shutil.which("bash"))
         class LifecycleTests(unittest.TestCase):
          def setUp(self):
-          self.tmp=tempfile.TemporaryDirectory(prefix="ghostnet lifecycle "); self.p=Path(self.tmp.name)
+          self.tmp=tempfile.TemporaryDirectory(prefix="ghostnet lifecycle "); self.p=Path(self.tmp.name).resolve()
           self.env=dict(os.environ, BAN_NO_ANIMATION="1", HOME=str(self.p/"home"), XDG_STATE_HOME=str(self.p/"state"), PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
          def tearDown(self): self.tmp.cleanup()
          def call(self, script, action, *args):
-          return subprocess.run(["bash",str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
+          return subprocess.run([BASH,str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
          def test_doctor_reports_python_and_missing_environment_without_writing(self):
           (self.p/"app.py").write_text("print('ok')")
           (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
@@ -418,7 +441,7 @@ jobs:
            app.write_text("from pathlib import Path; Path('seen-one').touch()")
            log=self.p/"watch.log"
            with log.open('w') as output:
-            proc=subprocess.Popen(['bash',str(ROOT/script),'watch','--no-animation',str(self.p)],env=self.env,stdout=output,stderr=output,start_new_session=(os.name != "nt"))
+            proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--no-animation',str(self.p)],env=self.env,stdout=output,stderr=output,start_new_session=(os.name != "nt"))
             try:
              deadline=time.monotonic()+10
              while not (self.p/"seen-one").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
@@ -451,7 +474,7 @@ jobs:
           (self.p/"main.cpp").write_text('not valid C++')
           for script in ("ban.sh","ban-ru.sh"):
            r=self.call(script,"build"); self.assertNotEqual(r.returncode,0)
-           reports=list((self.p/"state/ghostnet/reports").glob('*.log')); self.assertTrue(reports,r.stdout+r.stderr)
+           reports=list((self.p/"state/ghostnet/reports").glob('error.*')); self.assertTrue(reports,r.stdout+r.stderr)
            text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.0',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
          def test_setup_installs_local_wheel_and_run_imports_package(self):
           import zipfile
@@ -477,14 +500,14 @@ jobs:
          def test_completion_output_and_installed_manual(self):
           for script in ('ban.sh','ban-ru.sh'):
            for shell in ('bash','zsh','powershell'):
-            r=subprocess.run(['bash',str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
+            r=subprocess.run([BASH,str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
             self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertNotIn('[SCAN',r.stdout); self.assertIn('doctor',r.stdout); self.assertIn('setup',r.stdout)
-           r=subprocess.run(['bash',str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
            completion=self.p/'completion.sh'; completion.write_text(r.stdout)
-           r=subprocess.run(['bash','-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
+           r=subprocess.run([BASH,'-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
            self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('doctor',r.stdout)
           prefix=self.p/'installed'
-          r=subprocess.run(['bash',str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
+          r=subprocess.run([BASH,str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
           self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((prefix/'share/man/man1/ghostnet.1').exists())
           self.assertTrue((prefix/'share/bash-completion/completions/ghostnet').exists())
          def test_setup_requirements_with_nested_python_sources(self):
@@ -502,7 +525,7 @@ jobs:
           for script in ('ban.sh','ban-ru.sh'):
            (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=first\n')
            r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
-           first=self.p/'.ghostnet-build'/('windows' if os.name=='nt' else 'linux')/('first.exe' if os.name=='nt' else 'first'); first.write_text('user replacement')
+           first=self.p/'.ghostnet-build'/('windows' if os.name=='nt' else ('macos' if platform.system()=='Darwin' else 'linux'))/('first.exe' if os.name=='nt' else 'first'); first.write_text('user replacement')
            (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=second\n')
            r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
            r=self.call(script,'clean'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue(first.exists(),r.stdout+r.stderr); self.assertEqual(first.read_text(),'user replacement')
@@ -519,7 +542,7 @@ jobs:
           for script in ('ban.sh','ban-ru.sh'):
            marker=self.p/'descendant.pid'; marker.unlink(missing_ok=True); pid=None
            with (self.p/'orphan.log').open('w') as out:
-            proc=subprocess.Popen(['bash',str(ROOT/script),'watch',str(self.p)],env=self.env,stdout=out,stderr=out,start_new_session=True)
+            proc=subprocess.Popen([BASH,str(ROOT/script),'watch',str(self.p)],env=self.env,stdout=out,stderr=out,start_new_session=True)
             try:
              deadline=time.monotonic()+10
              while not marker.exists() and proc.poll() is None and time.monotonic()<deadline:time.sleep(.1)
@@ -531,6 +554,26 @@ jobs:
             finally:
              if proc.poll() is None: os.killpg(proc.pid,signal.SIGKILL);proc.wait()
              if pid and alive(pid): os.kill(pid,signal.SIGKILL)
+         @unittest.skipIf(os.name=='nt','Unix directory alias contract')
+         def test_clean_handles_project_directory_alias(self):
+          (self.p/'main.cpp').write_text('int main(){}'); alias=self.p/'alias'; alias.symlink_to(self.p,target_is_directory=True)
+          for script in ('ban.sh','ban-ru.sh'):
+           for action in ('build','clean'):
+            r=subprocess.run([BASH,str(ROOT/script),action,'--target','native',str(alias)],env=self.env,text=True,capture_output=True,timeout=30)
+            self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           self.assertFalse((self.p/'main').exists()); self.assertTrue((self.p/'main.cpp').exists())
+         @unittest.skipIf(os.name=='nt' or platform.system()=='Darwin','Linux cross target contract')
+         def test_watch_rejects_cross_target_before_build(self):
+          import signal
+          (self.p/'main.cpp').write_text('int main(){}')
+          for script in ('ban.sh','ban-ru.sh'):
+           proc=subprocess.Popen([BASH,str(ROOT/script),'watch','--target','windows',str(self.p)],env=self.env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+           try:
+            try: out,err=proc.communicate(timeout=3)
+            except subprocess.TimeoutExpired: self.fail('watch ignored the requested cross target and started a native build')
+            self.assertNotEqual(proc.returncode,0,out+err); self.assertIn('native',out+err); self.assertFalse((self.p/'main').exists())
+           finally:
+            if proc.poll() is None: os.killpg(proc.pid,signal.SIGTERM); proc.communicate(timeout=5)
         if __name__=="__main__": unittest.main()
         PYLIFECYCLE
   native-installer:
@@ -647,6 +690,13 @@ jobs:
             $Tokens=$null; $Errors=$null
             [System.Management.Automation.Language.Parser]::ParseInput($CompletionText,[ref]$Tokens,[ref]$Errors) | Out-Null
             Assert ($Errors.Count -eq 0) 'PowerShell completion syntax failed'
+            $env:PATH=(Join-Path $Root 'bin')+';'+$env:PATH
+            . (Join-Path $Repo 'tools/ghostnet.ps1')
+            $Completions=TabExpansion2 'ghostnet do' ('ghostnet do'.Length)
+            Assert (@($Completions.CompletionMatches | Where-Object { $_.CompletionText -eq 'doctor' }).Count -gt 0) 'PowerShell command completion failed'
+            $Completions=TabExpansion2 'ghostnet build --target wi' ('ghostnet build --target wi'.Length)
+            Assert (@($Completions.CompletionMatches | Where-Object { $_.CompletionText -eq 'windows' }).Count -gt 0) 'PowerShell target completion failed'
+
             & $Command auto-update enable
             Assert ($LASTEXITCODE -eq 0) 'Scheduler command failed'
             $Status=(& $Command auto-update status | Out-String | ConvertFrom-Json)

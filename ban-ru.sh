@@ -279,7 +279,7 @@ save_error_report() {
     folder="$(state_folder)/reports"
     [[ ! -L "$(state_folder)" && ! -L "$folder" ]] || return 0
     (umask 077; mkdir -p -- "$folder") 2>/dev/null || return 0
-    report=$(umask 077; mktemp "$folder/error.XXXXXX.log") || return 0
+    report=$(umask 077; mktemp "$folder/error.XXXXXX") || return 0
     {
         printf 'GHOSTNET 1.4.0\nHost: %s\nProject: %s\nOperation: %s\nExit: %s\nCommand: ' "$HOST_SYSTEM" "$TARGET_DIR" "$label" "$status"
         printf '%q ' "$@"; printf '\n\nTools:\n'
@@ -1395,7 +1395,9 @@ if operation == 'record':
     for name, value in generated().items():
         if before.get(name) != value: owned[name] = value
     for output in outputs:
-        path = pathlib.Path(output).absolute()
+        original = pathlib.Path(output).absolute()
+        if original.is_symlink(): continue
+        path = original.resolve()
         try: name = str(path.relative_to(root))
         except ValueError: continue
         if safe_path(name) is None: continue
@@ -1432,9 +1434,9 @@ PYCLEAN
 project_watch() {
     local launcher
     launcher=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/${BASH_SOURCE[0]##*/}
-    "$PYTHON_BIN" - "$launcher" "$TARGET_DIR" "$BUILD_MODE" "$RUN_FILE" "$HOST_KIND" "$INTERFACE_LANG" <<'PYWATCH'
+    "$PYTHON_BIN" - "$launcher" "$TARGET_DIR" "$BUILD_MODE" "$RUN_FILE" "$HOST_KIND" "$INTERFACE_LANG" "$BASH" <<'PYWATCH'
 import os, pathlib, signal, subprocess, sys, time
-launcher, folder, mode, entry, host, lang = sys.argv[1:]
+launcher, folder, mode, entry, host, lang, bash_executable = sys.argv[1:]
 root = pathlib.Path(folder).resolve()
 state = pathlib.Path(os.environ.get('XDG_STATE_HOME',str(pathlib.Path.home()/'.local/state'))).resolve()/'ghostnet'
 ignored = {'.git', '.venv', 'venv', 'node_modules', '.ghostnet-build', '__pycache__', 'target', 'bin', 'obj', '.build', '.gradle', '.dart_tool', 'zig-out', '.zig-cache'}
@@ -1452,7 +1454,7 @@ def snapshot():
                 stat = path.stat(); result[str(path.relative_to(root))] = (stat.st_mtime_ns,stat.st_size)
             except OSError: pass
     return result
-command = ['bash',launcher,'run','--target','native','--no-animation','--mode',mode]
+command = [bash_executable,launcher,'run','--target','native','--no-animation','--mode',mode]
 if entry: command += ['--run-file',entry]
 command += [str(root)]
 env = dict(os.environ, BAN_NO_ANIMATION='1')
@@ -1485,6 +1487,24 @@ if host == 'windows':
             error = ctypes.get_last_error(); kernel.CloseHandle(handle); raise ctypes.WinError(error)
         return handle
 
+def signal_group(signum):
+    try:
+        os.killpg(child.pid,signum); return True
+    except ProcessLookupError: return False
+    except PermissionError:
+        # Darwin can reject a group signal after the group leader has exited.
+        # Signal remaining processes owned by this user individually.
+        child.poll()
+        processes = subprocess.run(['ps','-axo','pid=,pgid=,uid='],capture_output=True,text=True,check=True,timeout=3)
+        members = []
+        for line in processes.stdout.splitlines():
+            values = line.split()
+            if len(values) == 3 and int(values[1]) == child.pid and int(values[2]) == os.getuid(): members.append(int(values[0]))
+        for pid in members:
+            try: os.kill(pid,signum)
+            except ProcessLookupError: pass
+        return bool(members)
+
 def stop_child():
     global child, job
     if child is None: return
@@ -1495,16 +1515,13 @@ def stop_child():
             subprocess.run(['taskkill.exe','/PID',str(child.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     else:
         # The process group may still contain children after its leader exits.
-        try: os.killpg(child.pid,signal.SIGTERM)
-        except ProcessLookupError: pass
+        signal_group(signal.SIGTERM)
         deadline = time.monotonic()+2
         while time.monotonic() < deadline:
             child.poll()
-            try: os.killpg(child.pid,0)
-            except ProcessLookupError: break
+            if not signal_group(0): break
             time.sleep(.1)
-        try: os.killpg(child.pid,signal.SIGKILL)
-        except ProcessLookupError: pass
+        signal_group(signal.SIGKILL)
     try: child.wait(timeout=2)
     except subprocess.TimeoutExpired: child.kill(); child.wait()
     child = None
@@ -1630,7 +1647,9 @@ project_setup() {
 
 case "$ACTION" in
     clean) clean_inventory clean; exit $? ;;
-    watch) project_watch; exit $? ;;
+    watch)
+        [[ "$DISPLAY_TARGET" == "$HOST_KIND" ]] || feature_error "$(ui 'watch supports --target native only.' 'watch поддерживает только --target native.')"
+        project_watch; exit $? ;;
     doctor) project_doctor; exit $? ;;
     setup) project_setup; exit $? ;;
     check) check_dependencies; exit $? ;;
