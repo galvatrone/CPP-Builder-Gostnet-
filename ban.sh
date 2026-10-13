@@ -1436,6 +1436,9 @@ project_watch() {
     launcher=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/${BASH_SOURCE[0]##*/}
     "$PYTHON_BIN" - "$launcher" "$TARGET_DIR" "$BUILD_MODE" "$RUN_FILE" "$HOST_KIND" "$INTERFACE_LANG" "$BASH" <<'PYWATCH'
 import os, pathlib, signal, subprocess, sys, time
+# Match the Bash interface even when Windows redirects through a legacy code page.
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 launcher, folder, mode, entry, host, lang, bash_executable = sys.argv[1:]
 root = pathlib.Path(folder).resolve()
 state = pathlib.Path(os.environ.get('XDG_STATE_HOME',str(pathlib.Path.home()/'.local/state'))).resolve()/'ghostnet'

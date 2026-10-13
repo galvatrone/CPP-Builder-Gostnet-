@@ -15,7 +15,7 @@ optdepends=('gcc: C and C++ compilation' 'rust: Rust and Cargo projects' 'go: Go
             'cmake: CMake projects' 'ninja: CMake backend' 'make: Make projects'
             'mingw-w64-gcc: Windows cross compilation')
 source=("$pkgname-$pkgver.zip::$url/releases/download/v$pkgver/ghostnet-linux.zip")
-sha256sums=('ccf02e26bc6eba1ffa2715f0cc01726620636182bca48b84709ff3619b513d3a')
+sha256sums=('f63abd3c25a9d8f1a1402d5dc44c508c1bbfe89484842e6af5c263fff502e945')
 package() {
     cd "$srcdir/GHOSTNET"
     install -Dm755 ban.sh "$pkgdir/usr/share/ghostnet/ban.sh"

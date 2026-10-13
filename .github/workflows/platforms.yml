@@ -139,6 +139,7 @@ jobs:
            r=self.call(script,"doctor"); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("[MISSING]",r.stdout)
          def test_watch_restarts_after_source_change_and_ignores_venv(self):
           import time, signal
+          self.env["PYTHONIOENCODING"]="ascii"
           app=self.p/"app.py"; app.write_text("from pathlib import Path; Path('seen-one').touch()")
           for script in ("ban.sh","ban-ru.sh"):
            (self.p/"seen-one").unlink(missing_ok=True); (self.p/"seen-two").unlink(missing_ok=True)
@@ -435,6 +436,7 @@ jobs:
            r=self.call(script,"doctor"); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("[MISSING]",r.stdout)
          def test_watch_restarts_after_source_change_and_ignores_venv(self):
           import time, signal
+          self.env["PYTHONIOENCODING"]="ascii"
           app=self.p/"app.py"; app.write_text("from pathlib import Path; Path('seen-one').touch()")
           for script in ("ban.sh","ban-ru.sh"):
            (self.p/"seen-one").unlink(missing_ok=True); (self.p/"seen-two").unlink(missing_ok=True)
