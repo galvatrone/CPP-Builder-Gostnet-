@@ -4,7 +4,7 @@ set "GHOSTNET_INSTALLER=%~f0"
 set "GHOSTNET_YES=0"
 set "GHOSTNET_NO_LAUNCH=0"
 set "GHOSTNET_UPDATE=0"
-set "GHOSTNET_VERSION=v1.2.0"
+set "GHOSTNET_VERSION=v1.3.0"
 set "GHOSTNET_APP_DIR=%LOCALAPPDATA%\GHOSTNET"
 :parse
 if "%~1"=="" goto execute
@@ -119,7 +119,7 @@ function Ensure-Msys2([string]$Requested,[string]$Work) {
         $Process=Start-Process -FilePath $Installer -ArgumentList $Arguments -Wait -PassThru
         if ($Process.ExitCode -ne 0 -or !(Test-Path -LiteralPath $Bash)) { throw 'MSYS2 installation failed.' }
     }
-    $env:MSYSTEM='UCRT64'; $env:CHERE_INVOKING='1'
+    $env:MSYS2_PATH_TYPE='inherit';$env:MSYSTEM='UCRT64'; $env:CHERE_INVOKING='1'
     & $Bash --login -c 'for tool in g++ python rustc cargo cmake ninja make; do command -v "$tool" >/dev/null || exit 1; done' | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Host '[MSYS2] Preparing C++, Python, Rust, CMake and Make tools...'
@@ -149,7 +149,7 @@ $Bash=Join-Path $State.MsysRoot 'usr\bin\bash.exe'
 if (!(Test-Path -LiteralPath $Bash)) { Write-Error 'MSYS2 is missing. Run GHOSTNET-Install.cmd again.'; exit 1 }
 $Script='ban.sh';if ($Language -eq 'ru') { $Script='ban-ru.sh' }
 $Script=(Join-Path $State.Payload $Script).Replace('\','/')
-$env:MSYSTEM='UCRT64';$env:CHERE_INVOKING='1'
+$env:MSYS2_PATH_TYPE='inherit';$env:MSYSTEM='UCRT64';$env:CHERE_INVOKING='1'
 & $Bash --login $Script @ForwardedArgs
 exit $LASTEXITCODE
 '@

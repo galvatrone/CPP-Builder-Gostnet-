@@ -42,12 +42,12 @@ Run without arguments for the arrow-key menu (↑/↓ and Enter).
   --install-deps     Install missing tools
   --auto             Check tools and build automatically
   --target TARGET    native, linux, macos, windows or both
-  --mode MODE        auto, files, project, cmake, make, cargo or python
+  --mode MODE        auto, files, project, cmake, make, cargo, python, go, node, dotnet, maven, gradle, swift, zig
   --run-file PATH    Project entry point (relative to project folder)
   --run              Run the program after a successful build
   --yes              Allow package installation without another confirmation
   --no-animation     Disable animations
-  --version          GHOSTNET 1.2.0
+  --version          GHOSTNET 1.3.0
   --help             Show help
 
 Example: bash ban.sh --auto --target linux --run ./project
@@ -84,7 +84,7 @@ while [[ $# -gt 0 ]]; do
         --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         --yes) ASSUME_YES=1 ;;
         --no-animation) BAN_NO_ANIMATION=1 ;;
-        --version) printf 'GHOSTNET 1.2.0\n'; exit 0 ;;
+        --version) printf 'GHOSTNET 1.3.0\n'; exit 0 ;;
         --help|-h) usage; exit 0 ;;
         --)
             shift
@@ -108,7 +108,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-case "$BUILD_MODE" in auto|files|project|cmake|make|cargo|python) ;; *) printf '[ERROR] Invalid build mode: %s\n' "$BUILD_MODE" >&2; exit 2 ;; esac
+case "$BUILD_MODE" in auto|files|project|cmake|make|cargo|python|go|node|dotnet|maven|gradle|swift|zig) ;; *) printf '[ERROR] Invalid build mode: %s\n' "$BUILD_MODE" >&2; exit 2 ;; esac
 
 ANIMATION_ENABLED=0
 if [[ "${BAN_NO_ANIMATION:-0}" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
@@ -191,9 +191,11 @@ fi
 
 LINUX_CXX="g++"
 WIN_CXX="x86_64-w64-mingw32-g++"
+WIN_CC="x86_64-w64-mingw32-gcc"
 PYTHON_BIN="python3"
 if [[ "$HOST_KIND" == "windows" ]]; then
     WIN_CXX="g++"
+    WIN_CC="gcc"
 fi
 select_python() {
     if [[ "$HOST_KIND" == "windows" ]] && ! command -v python3 >/dev/null 2>&1 && command -v python >/dev/null 2>&1; then
@@ -353,6 +355,211 @@ choose_menu() {
     printf "\n"
 }
 
+
+# Native language adapters: build/validate first, execute only on request.
+go_command() {
+    local operation="$1" flags
+    shift
+    flags=$(go env GOFLAGS) || return $?
+    if [[ "$flags" != *-buildvcs=* ]] && ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+        go "$operation" -buildvcs=false "$@"
+    else
+        go "$operation" "$@"
+    fi
+}
+source_go_command() { (cd -- "$1" && go_command build -o "$2" "$3"); }
+extra_tools() {
+    case "$1" in
+        *.c) printf '%s\n' gcc ;; *.go) printf '%s\n' go ;;
+        *.java) printf '%s\n' javac java ;; *.js|*.mjs|*.cjs) printf '%s\n' node ;;
+        *.ts|*.mts|*.cts) printf '%s\n' "$TSC_BIN" node ;;
+        *.cs) printf '%s\n' dotnet ;; *.sh) printf '%s\n' bash ;; *.rb) printf '%s\n' ruby ;;
+        *.php) printf '%s\n' php ;; *.lua) printf '%s\n' lua luac ;;
+        *.swift) printf '%s\n' swiftc ;; *.kt) printf '%s\n' kotlinc java ;;
+        *.dart) printf '%s\n' dart ;; *.zig) printf '%s\n' zig ;;
+    esac
+}
+generated_directory() {
+    local component path
+    path=$(cd -- "$TARGET_DIR" && pwd)/.ghostnet-build
+    [[ ! -L "$path" ]] || { printf '[ERROR] .ghostnet-build must not be a symlink.\n' >&2; return 1; }
+    for component in "$HOST_KIND" "$1" "$2"; do
+        path+="/$component"
+        [[ ! -L "$path" ]] || { printf '[ERROR] Generated directory must not be a symlink: %s\n' "$path" >&2; return 1; }
+    done
+    if [[ -d "$path" ]] && IFS= read -r -d '' component < <(find "$path" -type l -print0 -quit); then
+        printf '[ERROR] %s: %s\n' "$(ui 'Symlink in generated output' 'Символическая ссылка в выходной папке')" "$component" >&2
+        return 1
+    fi
+    mkdir -p -- "$path" || return 1
+    printf '%s' "$path"
+}
+record_extra() { built_files+=("$1"); built_kinds+=("$2"); }
+run_language_entry() {
+    local entry="$1" kind="$2"
+    shift 2
+    case "$kind" in
+        node) node "$entry" "$@" ;; java) java "$entry" "$@" ;;
+        csharp) dotnet "$entry" "$@" ;; kotlin) java -jar "$entry" "$@" ;;
+        bash) bash "$entry" "$@" ;; ruby) ruby "$entry" "$@" ;;
+        php) php "$entry" "$@" ;; lua) lua "$entry" "$@" ;;
+    esac
+}
+build_extra_source() {
+    local src="$1" base="$2" index="$3" directory name compiled framework sdk temporary absolute_src absolute_base
+    absolute_src=$(cd -- "$(dirname -- "$src")" && pwd)/"${src##*/}" || return 1
+    absolute_base=$(cd -- "$(dirname -- "$base")" && pwd)/"${base##*/}" || return 1
+    case "$src" in
+        *.c)
+            if [[ "$BUILD_TARGET" == linux || "$BUILD_TARGET" == both ]]; then
+                run_build "$HOST_LABEL: $src" gcc -O2 -std=c17 "$src" -o "$base" || return 1
+                record_extra "$base" native
+            fi
+            if [[ "$BUILD_TARGET" == windows || "$BUILD_TARGET" == both ]]; then
+                run_build "Windows: $src" "$WIN_CC" -O2 -std=c17 "$src" -o "$base.exe" -static -s || return 1
+                [[ "$BUILD_TARGET" != windows ]] || record_extra "$base.exe" windows
+            fi ;;
+        *.go)
+            run_build "Go: $src" source_go_command "$(dirname -- "$absolute_src")" "$absolute_base" "${src##*/}" || return 1
+            record_extra "$base" native ;;
+        *.java)
+            directory=$(generated_directory java "$index") || return 1
+            run_build "Java: $src" javac -d "$directory" "$src" || return 1
+            record_extra "$src" java ;;
+        *.js|*.mjs|*.cjs)
+            run_build "JavaScript: $src" node --check "$src" || return 1
+            record_extra "$src" node ;;
+        *.ts|*.mts|*.cts)
+            directory=$(generated_directory typescript "$index") || return 1
+            run_build "TypeScript: $src" "$TSC_BIN" --target ES2020 --module NodeNext --moduleResolution NodeNext --rootDir "$(dirname -- "$absolute_src")" --outDir "$directory" "$absolute_src" || return 1
+            name="${src##*/}"; name="${name%.*}"
+            case "$src" in *.mts) compiled="$directory/$name.mjs" ;; *.cts) compiled="$directory/$name.cjs" ;; *) compiled="$directory/$name.js" ;; esac
+            [[ -f "$compiled" ]] || return 1
+            record_extra "$compiled" node ;;
+        *.cs)
+            directory=$(generated_directory csharp "$index") || return 1
+            for compiled in "$directory/Program.cs" "$directory/GhostnetFile.csproj" "$directory/out" "$directory/obj"; do [[ ! -L "$compiled" ]] || return 1; done
+            sdk=$(dotnet --version) || return 1; sdk="${sdk%%.*}"
+            [[ "$sdk" =~ ^[0-9]+$ && "$sdk" -ge 6 ]] || { printf '[ERROR] .NET SDK 6+ required.\n' >&2; return 1; }
+            framework="net$sdk.0"
+            temporary=$(mktemp "$directory/input.XXXXXX") || return 1
+            cp -- "$src" "$temporary" && mv -f -- "$temporary" "$directory/Program.cs" || return 1
+            temporary=$(mktemp "$directory/project.XXXXXX") || return 1
+            printf '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>%s</TargetFramework></PropertyGroup></Project>\n' "$framework" > "$temporary"
+            mv -f -- "$temporary" "$directory/GhostnetFile.csproj" || return 1
+            run_build "C#: $src" dotnet build "$directory/GhostnetFile.csproj" --nologo --output "$directory/out" || return 1
+            record_extra "$directory/out/GhostnetFile.dll" csharp ;;
+        *.sh) run_build "Bash: $src" bash -n "$src" || return 1; record_extra "$src" bash ;;
+        *.rb) run_build "Ruby: $src" ruby -c "$src" || return 1; record_extra "$src" ruby ;;
+        *.php) run_build "PHP: $src" php -l "$src" || return 1; record_extra "$src" php ;;
+        *.lua) run_build "Lua: $src" luac -p "$src" || return 1; record_extra "$src" lua ;;
+        *.swift) run_build "Swift: $src" swiftc "$src" -o "$base" || return 1; record_extra "$base" native ;;
+        *.kt)
+            directory=$(generated_directory kotlin "$index") || return 1
+            [[ ! -L "$directory/app.jar" ]] || return 1
+            run_build "Kotlin: $src" kotlinc "$src" -include-runtime -d "$directory/app.jar" || return 1
+            record_extra "$directory/app.jar" kotlin ;;
+        *.dart) run_build "Dart: $src" dart compile exe "$src" -o "$base" || return 1; record_extra "$base" native ;;
+        *.zig)
+            directory=$(generated_directory zig "$index") || return 1
+            [[ ! -L "$directory/program" && ! -L "$directory/program.exe" && ! -L "$directory/program.o" ]] || return 1
+            compiled="$directory/program"; [[ "$HOST_KIND" != windows ]] || compiled+=.exe
+            run_build "Zig: $src" zig build-exe "$src" -O ReleaseSafe "-femit-bin=$compiled" || return 1
+            record_extra "$compiled" native ;;
+    esac
+}
+node_script() { project_command node -e 'const p=JSON.parse(require("fs").readFileSync("package.json","utf8")); process.exit(p.scripts && typeof p.scripts[process.argv[1]]==="string" ? 0 : 3)' "$1"; }
+project_manager() {
+    case "$PROJECT_BUILDER" in
+        maven) if [[ -f "$TARGET_DIR/mvnw" ]]; then project_command bash ./mvnw "$@"; else project_command mvn "$@"; fi ;;
+        gradle) if [[ -f "$TARGET_DIR/gradlew" ]]; then project_command bash ./gradlew "$@"; else project_command gradle "$@"; fi ;;
+    esac
+}
+mixed_c_project() {
+    local platform="$1" binary="$2" source object index=0 cc=gcc cxx="$LINUX_CXX" has_cxx=0
+    local objects=() flags=()
+    [[ "$platform" != windows ]] || { cc="$WIN_CC"; cxx="$WIN_CXX"; flags=("${WIN_FLAGS_METHOD1[@]}"); [[ "$WIN_METHOD" != 2 ]] || flags=("${WIN_FLAGS_METHOD2[@]}"); }
+    for source in "${PROJECT_SOURCES[@]}"; do
+        object="${binary}.source-$index.o"; index=$((index+1))
+        [[ ! -L "$object" ]] || { printf '[ERROR] Symlink object: %s\n' "$object" >&2; return 1; }
+        case "$source" in
+            *.c) "$cc" -std=c17 -O2 "${include_flags[@]}" -c "$source" -o "$object" || return $? ;;
+            *) has_cxx=1; "$cxx" "${CPP_FLAGS[@]}" "${include_flags[@]}" -c "$source" -o "$object" || return $? ;;
+        esac
+        objects+=("$object")
+    done
+    [[ "$has_cxx" -eq 1 ]] || cxx="$cc"
+    if ! "$cxx" "${objects[@]}" -o "$binary" "${flags[@]}"; then
+        [[ "$platform" == windows && "$WIN_METHOD" == auto ]] || return 1
+        "$cxx" "${objects[@]}" -o "$binary" "${WIN_FLAGS_METHOD2[@]}" || return $?
+    fi
+}
+
+build_external_project() {
+    local path
+    case "$PROJECT_BUILDER" in
+        go) run_build 'Go build' project_command go_command build ./... ;;
+        node)
+            run_build 'Node manifest' project_command node -e 'JSON.parse(require("fs").readFileSync("package.json","utf8"))' || return 1
+            if node_script build; then run_build 'npm build' project_command npm run build
+            else
+                local checked=0
+                while IFS= read -r -d '' path; do
+                    case "$path" in
+                        *.ts|*.mts|*.cts) feature_error "$(ui 'TypeScript projects need scripts.build in package.json (for example: tsc).' 'Для проекта TypeScript добавьте scripts.build в package.json (например: tsc).')" ;;
+                        *) run_build "$path" node --check "$path" || return 1; checked=$((checked+1)) ;;
+                    esac
+                done < <(find "$TARGET_DIR" -type d \( -name .git -o -name node_modules -o -name .ghostnet-build \) -prune -o -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' -o -name '*.mts' -o -name '*.cts' \) -print0)
+                [[ "$checked" -gt 0 ]] || feature_error "$(ui 'No JavaScript sources found: define scripts.build in package.json.' 'Исходники JavaScript не найдены: добавьте scripts.build в package.json.')"
+            fi ;;
+        dotnet)
+            for path in "${DOTNET_PROJECTS[@]}"; do run_build '.NET build' project_command dotnet build "$path" --nologo || return 1; done ;;
+        maven) run_build 'Maven build' project_manager -B package -DskipTests ;;
+        gradle) run_build 'Gradle build' project_manager build -x test ;;
+        swift) run_build 'SwiftPM build' project_command swift build ;;
+        zig) run_build 'Zig build' project_command zig build ;;
+    esac
+}
+test_external_project() {
+    case "$PROJECT_BUILDER" in
+        go) run_build 'Go tests' project_command go_command test ./... ;;
+        node) node_script test || feature_error "$(ui 'Define a test script in package.json.' 'Добавьте test в scripts файла package.json.')"; run_build 'npm tests' project_command npm test ;;
+        dotnet) for path in "${DOTNET_PROJECTS[@]}"; do run_build '.NET tests' project_command dotnet test "$path" --nologo || return 1; done ;;
+        maven) run_build 'Maven tests' project_manager -B test ;;
+        gradle) run_build 'Gradle tests' project_manager test ;;
+        swift) run_build 'SwiftPM tests' project_command swift test ;;
+        zig) run_build 'Zig tests' project_command zig build test ;;
+    esac
+}
+run_external_project() {
+    local path entry="${RUN_FILE:-$PROJECT_RUN}"
+    case "$PROJECT_BUILDER" in
+        go)
+            [[ -z "$entry" ]] || relative_project_path "$entry" || feature_error "$(ui 'Invalid Go package path.' 'Некорректный путь пакета Go.')"
+            project_command go_command run "./${entry:-.}" "${PROJECT_ARGS[@]}" ;;
+        node)
+            if [[ -n "$entry" ]]; then
+                relative_project_path "$entry" && [[ -f "$TARGET_DIR/$entry" ]] || feature_error "$(ui 'Invalid Node entry.' 'Некорректная точка входа Node.')"
+                project_command node "$entry" "${PROJECT_ARGS[@]}"
+            elif node_script start; then project_command npm run start -- "${PROJECT_ARGS[@]}"
+            else feature_error "$(ui 'Define scripts.start or --run-file in the Node project.' 'Укажите scripts.start или --run-file для проекта Node.')"; fi ;;
+        dotnet)
+            if [[ -n "$entry" ]]; then
+                relative_project_path "$entry" && [[ "$entry" == *.csproj && -f "$TARGET_DIR/$entry" ]] || feature_error "$(ui 'Use --run-file PATH.csproj.' 'Используйте --run-file PATH.csproj.')"
+            elif [[ ${#DOTNET_PROJECTS[@]} -eq 1 ]]; then entry="${DOTNET_PROJECTS[0]}"
+            elif [[ -t 0 && -t 1 ]]; then choose_menu "$(ui 'Select .NET project:' 'Выберите проект .NET:')" 0 "${DOTNET_PROJECTS[@]}"; entry="${DOTNET_PROJECTS[$MENU_SELECTED]}"
+            else feature_error "$(ui 'Multiple .NET projects: use --run-file PATH.csproj.' 'Несколько проектов .NET: укажите --run-file PATH.csproj.')"; fi
+            project_command dotnet run --no-build --project "$entry" -- "${PROJECT_ARGS[@]}" ;;
+        swift)
+            if [[ -n "$entry" ]]; then
+                [[ "$entry" =~ ^[a-zA-Z0-9_-]+$ ]] || feature_error "$(ui 'Swift entry must be a product name.' 'Для Swift укажите имя продукта.')"
+                project_command swift run --skip-build "$entry" "${PROJECT_ARGS[@]}"
+            else
+                [[ ${#PROJECT_ARGS[@]} -eq 0 ]] || feature_error "$(ui 'Select a Swift product with --run-file before passing arguments.' 'Укажите продукт Swift через --run-file перед передачей аргументов.')"
+                project_command swift run --skip-build
+            fi ;;
+    esac
+}
 
 # Additive UI helpers; each language script remains self-contained.
 ui() { if [[ "$INTERFACE_LANG" == ru ]]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
@@ -632,6 +839,9 @@ sources=()
 has_cpp=0
 has_py=0
 has_rs=0
+has_c=0
+TSC_BIN="tsc"
+DOTNET_PROJECTS=()
 
 if [[ "$ACTION" == "build" || "$ACTION" == "auto" || "$ACTION" == "test" || -n "$TARGET_DIR" || -n "$TARGET_DIR_PRESET" || -n "$SOURCE_FILE" ]]; then
     if [[ -z "$TARGET_DIR" ]]; then
@@ -647,10 +857,17 @@ if [[ "$ACTION" == "build" || "$ACTION" == "auto" || "$ACTION" == "test" || -n "
         printf '[ERROR] Folder not found: %s\n' "$TARGET_DIR" >&2
         exit 1
     fi
-    sources=("$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.cc "$TARGET_DIR"/*.cxx "$TARGET_DIR"/*.py "$TARGET_DIR"/*.rs)
+    sources=("$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.cc "$TARGET_DIR"/*.cxx "$TARGET_DIR"/*.py "$TARGET_DIR"/*.rs "$TARGET_DIR"/*.c "$TARGET_DIR"/*.go "$TARGET_DIR"/*.java "$TARGET_DIR"/*.js "$TARGET_DIR"/*.mjs "$TARGET_DIR"/*.cjs "$TARGET_DIR"/*.ts "$TARGET_DIR"/*.mts "$TARGET_DIR"/*.cts "$TARGET_DIR"/*.cs "$TARGET_DIR"/*.sh "$TARGET_DIR"/*.rb "$TARGET_DIR"/*.php "$TARGET_DIR"/*.lua "$TARGET_DIR"/*.swift "$TARGET_DIR"/*.kt "$TARGET_DIR"/*.dart "$TARGET_DIR"/*.zig)
+    # A downloaded launcher beside the user's sources is tooling, not a build result.
+    launcher_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    project_sources=()
+    for src in "${sources[@]}"; do
+        [[ "$src" -ef "$launcher_root/ban.sh" || "$src" -ef "$launcher_root/ban-ru.sh" ]] || project_sources+=("$src")
+    done
+    sources=("${project_sources[@]}")
     if [[ -n "$SOURCE_FILE" ]]; then
         case "$SOURCE_FILE" in
-            *.cpp|*.cc|*.cxx|*.py|*.rs)
+            *.cpp|*.cc|*.cxx|*.py|*.rs|*.c|*.go|*.java|*.js|*.mjs|*.cjs|*.ts|*.mts|*.cts|*.cs|*.sh|*.rb|*.php|*.lua|*.swift|*.kt|*.dart|*.zig)
                 if [[ -f "$SOURCE_FILE" ]]; then
                     sources=("$SOURCE_FILE")
                 else
@@ -682,6 +899,8 @@ PROJECT_BUILDER=""
 PROJECT_OUTPUT="program"
 PROJECT_RUN=""
 PROJECT_SOURCES=() PROJECT_INCLUDES=() PROJECT_ARGS=()
+for path in "$TARGET_DIR"/*.csproj; do DOTNET_PROJECTS+=("${path##*/}"); done
+if [[ -x "$TARGET_DIR/node_modules/.bin/tsc" ]]; then TSC_BIN=$(cd -- "$TARGET_DIR" && pwd)/node_modules/.bin/tsc; fi
 if [[ "$BUILD_MODE" != "files" ]]; then
     if [[ -f "$TARGET_DIR/ghostnet.conf" ]]; then
         while IFS= read -r config_line || [[ -n "$config_line" ]]; do
@@ -708,9 +927,16 @@ if [[ "$BUILD_MODE" != "files" ]]; then
         PROJECT_BUILDER="python"
     elif [[ -f "$TARGET_DIR/GNUmakefile" || -f "$TARGET_DIR/Makefile" || -f "$TARGET_DIR/makefile" ]]; then
         PROJECT_BUILDER="make"
+    elif [[ -f "$TARGET_DIR/go.mod" ]]; then PROJECT_BUILDER=go
+    elif [[ -f "$TARGET_DIR/package.json" ]]; then PROJECT_BUILDER=node
+    elif [[ ${#DOTNET_PROJECTS[@]} -gt 0 ]]; then PROJECT_BUILDER=dotnet
+    elif [[ -f "$TARGET_DIR/pom.xml" ]]; then PROJECT_BUILDER=maven
+    elif [[ -f "$TARGET_DIR/build.gradle" || -f "$TARGET_DIR/build.gradle.kts" ]]; then PROJECT_BUILDER=gradle
+    elif [[ -f "$TARGET_DIR/Package.swift" ]]; then PROJECT_BUILDER=swift
+    elif [[ -f "$TARGET_DIR/build.zig" ]]; then PROJECT_BUILDER=zig
     fi
     case "$BUILD_MODE" in
-        cmake|make|cargo|python) PROJECT_BUILDER="$BUILD_MODE" ;;
+        cmake|make|cargo|python|go|node|dotnet|maven|gradle|swift|zig) PROJECT_BUILDER="$BUILD_MODE" ;;
         project) PROJECT_BUILDER="${PROJECT_BUILDER:-cpp}" ;;
         auto)
             if [[ -z "$PROJECT_BUILDER" && ( "$ACTION" == "build" || "$ACTION" == "auto" || "$ACTION" == "test" ) && -t 0 && -t 1 ]]; then
@@ -721,7 +947,10 @@ if [[ "$BUILD_MODE" != "files" ]]; then
     esac
 fi
 if [[ -n "$PROJECT_BUILDER" ]]; then
-    case "$PROJECT_BUILDER" in cpp|cmake|make|cargo|python|none) ;; *) project_error "Invalid project builder: $PROJECT_BUILDER" ;; esac
+    case "$PROJECT_BUILDER" in cpp|cmake|make|cargo|python|none|go|node|dotnet|maven|gradle|swift|zig) ;; *) project_error "Invalid project builder: $PROJECT_BUILDER" ;; esac
+    case "$PROJECT_BUILDER" in go|node|dotnet|maven|gradle|swift|zig)
+        [[ "$BUILD_TARGET" != both && ( "$BUILD_TARGET" != windows || "$HOST_KIND" == windows ) ]] || feature_error "$(ui 'This builder supports --target native only.' 'Этот сборщик поддерживает только --target native.')" ;;
+    esac
     [[ -z "$SOURCE_FILE" ]] || project_error "BAN_SOURCE_FILE requires --mode files."
     if [[ "$PROJECT_BUILDER" == "cmake" || "$PROJECT_BUILDER" == "make" || "$PROJECT_BUILDER" == "cargo" || "$PROJECT_BUILDER" == "python" ]]; then
         if [[ "$BUILD_TARGET" == "both" || ( "$BUILD_TARGET" == "windows" && "$HOST_KIND" != "windows" ) ]]; then
@@ -739,19 +968,28 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
         if [[ -z "$PROJECT_RUN" && -f "$TARGET_DIR/__main__.py" ]]; then PROJECT_RUN="__main__.py"; fi
     elif [[ "$PROJECT_BUILDER" == "cpp" ]]; then
         if [[ ${#PROJECT_SOURCES[@]} -eq 0 ]]; then
-            for src in "$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.cc "$TARGET_DIR"/*.cxx; do
+            for src in "$TARGET_DIR"/*.cpp "$TARGET_DIR"/*.cc "$TARGET_DIR"/*.cxx "$TARGET_DIR"/*.c; do
                 PROJECT_SOURCES+=("${src##*/}")
             done
         fi
         [[ ${#PROJECT_SOURCES[@]} -gt 0 ]] || project_error "No C++ sources for the project."
         for src in "${PROJECT_SOURCES[@]}"; do
-            case "$src" in *.cpp|*.cc|*.cxx) ;; *) project_error "Unsupported C++ source: $src" ;; esac
+            case "$src" in *.cpp|*.cc|*.cxx|*.c) ;; *) project_error "Unsupported C++ source: $src" ;; esac
             [[ -f "$TARGET_DIR/$src" ]] || project_error "Source not found: $src"
         done
         for include in "${PROJECT_INCLUDES[@]}"; do
             [[ -d "$TARGET_DIR/$include" ]] || project_error "Include folder not found: $include"
         done
     fi
+    case "$PROJECT_BUILDER" in
+        go) [[ -f "$TARGET_DIR/go.mod" ]] || feature_error "$(ui 'go.mod not found.' 'Файл go.mod не найден.')" ;;
+        node) [[ -f "$TARGET_DIR/package.json" ]] || feature_error "$(ui 'package.json not found.' 'Файл package.json не найден.')" ;;
+        dotnet) [[ ${#DOTNET_PROJECTS[@]} -gt 0 ]] || feature_error "$(ui '.csproj not found.' 'Файл .csproj не найден.')" ;;
+        maven) [[ -f "$TARGET_DIR/pom.xml" ]] || feature_error "$(ui 'pom.xml not found.' 'Файл pom.xml не найден.')" ;;
+        gradle) [[ -f "$TARGET_DIR/build.gradle" || -f "$TARGET_DIR/build.gradle.kts" ]] || feature_error "$(ui 'build.gradle not found.' 'Файл build.gradle не найден.')" ;;
+        swift) [[ -f "$TARGET_DIR/Package.swift" ]] || feature_error "$(ui 'Package.swift not found.' 'Файл Package.swift не найден.')" ;;
+        zig) [[ -f "$TARGET_DIR/build.zig" ]] || feature_error "$(ui 'build.zig not found.' 'Файл build.zig не найден.')" ;;
+    esac
     # The project build tools own source discovery; Python checks remain explicit.
     sources=("$TARGET_DIR"/*.py)
     entry="${RUN_FILE:-$PROJECT_RUN}"
@@ -759,7 +997,7 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
         sources+=("$TARGET_DIR/$entry")
     fi
     has_cpp=0 has_rs=0 has_py=0
-    case "$PROJECT_BUILDER" in cpp) has_cpp=1 ;; esac
+    case "$PROJECT_BUILDER" in cpp) for src in "${PROJECT_SOURCES[@]}"; do [[ "$src" == *.c ]] || has_cpp=1; done ;; esac
     [[ "$PROJECT_BUILDER" != "python" ]] || has_py=1
     if [[ -x "$TARGET_DIR/.venv/bin/python" ]]; then
         PYTHON_BIN=$(cd -- "$TARGET_DIR" && pwd)/.venv/bin/python
@@ -769,6 +1007,12 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
     [[ ${#sources[@]} -eq 0 ]] || has_py=1
 fi
 
+if [[ -z "$PROJECT_BUILDER" ]]; then
+    for src in "${sources[@]}"; do
+        case "$src" in *.cpp|*.cc|*.cxx|*.c|*.py|*.rs) continue ;; esac
+        [[ "$BUILD_TARGET" != both && ( "$BUILD_TARGET" != windows || "$HOST_KIND" == windows ) ]] || feature_error "$(ui 'New language adapters support --target native only.' 'Новые адаптеры языков поддерживают только --target native.')"
+    done
+fi
 project_passport
 [[ "$ACTION" != inspect ]] || exit 0
 
@@ -821,6 +1065,52 @@ if [[ "$PROJECT_BUILDER" == "make" ]]; then required_compilers+=(make); fi
 if [[ "$PROJECT_BUILDER" == "cargo" ]]; then required_compilers+=(cargo rustc); fi
 if [[ "$ACTION" == "test" && -z "$PROJECT_BUILDER" ]]; then project_error "Testing requires a CMake, Make, Cargo or Python project."; fi
 
+if [[ -z "$PROJECT_BUILDER" ]]; then
+    for src in "${sources[@]}"; do
+        if [[ "$src" == *.c ]]; then
+            [[ "$BUILD_TARGET" != linux && "$BUILD_TARGET" != both ]] || required_compilers+=(gcc)
+            [[ "$BUILD_TARGET" != windows && "$BUILD_TARGET" != both ]] || required_compilers+=("$WIN_CC")
+        else
+            while IFS= read -r tool; do [[ -z "$tool" ]] || required_compilers+=("$tool"); done < <(extra_tools "$src")
+        fi
+    done
+fi
+if [[ "$PROJECT_BUILDER" == cpp ]]; then
+    for src in "${PROJECT_SOURCES[@]}"; do
+        [[ "$src" == *.c ]] || continue
+        [[ "$BUILD_TARGET" != linux && "$BUILD_TARGET" != both ]] || required_compilers+=(gcc)
+        [[ "$BUILD_TARGET" != windows && "$BUILD_TARGET" != both ]] || required_compilers+=("$WIN_CC")
+    done
+fi
+case "$PROJECT_BUILDER" in
+    go) required_compilers+=(go) ;; node) required_compilers+=(node npm) ;; dotnet) required_compilers+=(dotnet) ;;
+    maven) required_compilers+=(java javac); [[ -f "$TARGET_DIR/mvnw" ]] || required_compilers+=(mvn) ;;
+    gradle) required_compilers+=(java javac); [[ -f "$TARGET_DIR/gradlew" ]] || required_compilers+=(gradle) ;;
+    swift) required_compilers+=(swift) ;; zig) required_compilers+=(zig) ;;
+esac
+# Preserve order while avoiding repeated checks/install arguments.
+unique_tools=(); for tool in "${required_compilers[@]}"; do found=0; for known in "${unique_tools[@]}"; do [[ "$known" != "$tool" ]] || found=1; done; [[ "$found" -eq 1 ]] || unique_tools+=("$tool"); done
+required_compilers=("${unique_tools[@]}")
+
+tool_help() {
+    local link=""
+    case "${1##*/}" in
+        tsc) link=https://www.typescriptlang.org/download/ ;;
+        dotnet) link=https://dotnet.microsoft.com/download ;;
+        java|javac) link=https://adoptium.net/ ;;
+        go) link=https://go.dev/doc/install ;;
+        node|npm) link=https://nodejs.org/ ;;
+        swift|swiftc) link=https://www.swift.org/install/ ;;
+        kotlinc) link=https://kotlinlang.org/docs/command-line.html ;;
+        dart) link=https://dart.dev/get-dart ;;
+        zig) link=https://ziglang.org/download/ ;;
+    esac
+    [[ -z "$link" ]] || printf '[HINT] %s: %s\n' "$(ui 'Install the SDK and reopen your terminal' 'Установите SDK и откройте терминал заново')" "$link" >&2
+    if [[ "${1##*/}" == tsc ]]; then
+        printf '[HINT] %s\n' "$(ui 'For a project: npm install --save-dev typescript; define scripts.build as tsc.' 'Для проекта: npm install --save-dev typescript; добавьте scripts.build: tsc.')" >&2
+    fi
+}
+
 check_dependencies() {
     local compiler missing=0
     [[ ! -x "$PYTHON_BIN" ]] && select_python
@@ -830,6 +1120,7 @@ check_dependencies() {
             printf '%b[✓] %s — found%b\n' "$GREEN" "$compiler" "$RESET"
         else
             printf '%b[✗] %s — not found%b\n' "$RED" "$compiler" "$RESET"
+            tool_help "$compiler"
             missing=1
         fi
     done
@@ -870,6 +1161,26 @@ install_dependencies() {
     for compiler in "${required_compilers[@]}"; do
         command -v "$compiler" >/dev/null 2>&1 && continue
         case "$manager:$compiler" in
+            apt-get:gcc|dnf:gcc|pacman:gcc|brew:gcc) package="gcc" ;;
+            msys2:gcc) package="mingw-w64-ucrt-x86_64-gcc" ;;
+            apt-get:x86_64-w64-mingw32-gcc) package="gcc-mingw-w64-x86-64" ;;
+            dnf:x86_64-w64-mingw32-gcc) package="mingw64-gcc" ;;
+            pacman:x86_64-w64-mingw32-gcc) package="mingw-w64-gcc" ;;
+            brew:x86_64-w64-mingw32-gcc) package="mingw-w64" ;;
+            apt-get:go) package="golang-go" ;; dnf:go) package="golang" ;; pacman:go|brew:go) package="go" ;;
+            apt-get:node|dnf:node|pacman:node|brew:node) package="nodejs"; [[ "$manager" != brew ]] || package=node ;;
+            apt-get:npm|dnf:npm|pacman:npm) package="npm" ;; brew:npm) package="node" ;;
+            apt-get:java|apt-get:javac) package="default-jdk" ;; dnf:java|dnf:javac) package="java-latest-openjdk-devel" ;;
+            pacman:java|pacman:javac) package="jdk-openjdk" ;; brew:java|brew:javac) package="openjdk" ;;
+            apt-get:bash|dnf:bash|pacman:bash|brew:bash) package="bash" ;;
+            apt-get:ruby|dnf:ruby|pacman:ruby|brew:ruby) package="ruby" ;;
+            apt-get:php) package="php-cli" ;; dnf:php|pacman:php|brew:php) package="php" ;;
+            apt-get:lua|apt-get:luac) package="lua5.4" ;; dnf:lua|dnf:luac|pacman:lua|pacman:luac|brew:lua|brew:luac) package="lua" ;;
+            apt-get:mvn|dnf:mvn|pacman:mvn|brew:mvn) package="maven" ;;
+            apt-get:gradle|dnf:gradle|pacman:gradle|brew:gradle) package="gradle" ;;
+            pacman:dotnet) package="dotnet-sdk" ;; brew:dotnet) package="dotnet" ;;
+            pacman:kotlinc|brew:kotlinc) package="kotlin" ;;
+            pacman:zig|brew:zig) package="zig" ;;
             apt-get:g++) package="g++" ;;
             apt-get:x86_64-w64-mingw32-g++) package="g++-mingw-w64-x86-64" ;;
             dnf:g++) package="gcc-c++" ;;
@@ -897,7 +1208,7 @@ install_dependencies() {
             apt-get:cargo|dnf:cargo) package="cargo" ;;
             pacman:cargo|brew:cargo) package="rust" ;;
             msys2:cargo) package="mingw-w64-ucrt-x86_64-rust" ;;
-            *) printf '[ERROR] No package mapping for tool: %s\n' "$compiler" >&2; return 1 ;;
+            *) printf '[ERROR] No package mapping for tool: %s\n' "$compiler" >&2; tool_help "$compiler"; return 1 ;;
         esac
         packages+=("$package")
     done
@@ -979,7 +1290,11 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
                 done
                 include_flags=()
                 for include in "${PROJECT_INCLUDES[@]}"; do include_flags+=(-I "$include"); done
-                if [[ "$platform" == "windows" ]]; then
+                contains_c=0
+                for source_path in "${PROJECT_SOURCES[@]}"; do [[ "$source_path" != *.c ]] || contains_c=1; done
+                if [[ "$contains_c" -eq 1 ]]; then
+                    run_build "$platform project" project_command mixed_c_project "$platform" "$binary" || exit 1
+                elif [[ "$platform" == "windows" ]]; then
                     if [[ "$WIN_METHOD" == "2" ]]; then
                         run_build "$platform project" project_command "$compiler" "${CPP_FLAGS[@]}" "${include_flags[@]}" "${PROJECT_SOURCES[@]}" -o "$binary" "${WIN_FLAGS_METHOD2[@]}" || exit 1
                     elif ! run_build "$platform project" project_command "$compiler" "${CPP_FLAGS[@]}" "${include_flags[@]}" "${PROJECT_SOURCES[@]}" -o "$binary" "${WIN_FLAGS_METHOD1[@]}"; then
@@ -1000,11 +1315,13 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
     if [[ "$PROJECT_BUILDER" == "cargo" ]]; then
         run_build "Cargo build" project_command cargo build || exit 1
     fi
+    case "$PROJECT_BUILDER" in go|node|dotnet|maven|gradle|swift|zig) build_external_project || exit $? ;; esac
     for src in "${sources[@]}"; do
         run_build "$src" "$PYTHON_BIN" -m py_compile "$src" || exit 1
     done
     if [[ "$ACTION" == "test" ]]; then
         case "$PROJECT_BUILDER" in
+            go|node|dotnet|maven|gradle|swift|zig) test_external_project ;;
             cmake) run_build "CMake tests" project_command ctest --test-dir ".ghostnet-build/$project_platform" --output-on-failure ;;
             make) run_build "Make tests" project_command make test ;;
             cargo) run_build "Cargo tests" project_command cargo test ;;
@@ -1018,6 +1335,7 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
     [[ "$ACTION" == test ]] || record_recent
     if [[ "$RUN_AFTER" == "1" ]]; then
         entry="${RUN_FILE:-$PROJECT_RUN}"
+        case "$PROJECT_BUILDER" in go|node|dotnet|swift) run_external_project; exit $? ;; esac
         if [[ -z "$entry" && "$PROJECT_BUILDER" == "cargo" ]]; then
             project_command cargo run -- "${PROJECT_ARGS[@]}"
             exit $?
@@ -1034,6 +1352,12 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
         printf '[RUN] Running -> %s\n' "$entry"
         case "$entry" in
             *.py) project_command "$PYTHON_BIN" "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.jar) project_command java -jar "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.js|*.mjs|*.cjs) project_command node "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.sh) project_command bash "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.rb) project_command ruby "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.php) project_command php "$entry" "${PROJECT_ARGS[@]}" ;;
+            *.lua) project_command lua "$entry" "${PROJECT_ARGS[@]}" ;;
             *.exe)
                 if [[ "$HOST_KIND" == "windows" || "$project_platform" != "windows" ]]; then
                     project_command "./$entry" "${PROJECT_ARGS[@]}"
@@ -1114,6 +1438,9 @@ for ((source_index = 0; source_index < ${#sources[@]}; source_index++)); do
     src="${sources[$source_index]}"
     base="${output_bases[$source_index]}"
     case "$src" in
+        *.c|*.go|*.java|*.js|*.mjs|*.cjs|*.ts|*.mts|*.cts|*.cs|*.sh|*.rb|*.php|*.lua|*.swift|*.kt|*.dart|*.zig)
+            build_extra_source "$src" "$base" "$source_index" || fail=1
+            continue ;;
         *.py)
             if run_build "$src" "$PYTHON_BIN" -m py_compile "$src"; then
                 built_files+=("$src")
@@ -1229,6 +1556,7 @@ if [[ "$RUN_AFTER" == "1" ]]; then
     [[ "$run_target" == */* ]] || run_target="./$run_target"
     printf '%b[RUN]%b Running -> %s\n' "$GREEN" "$RESET" "$run_target"
     case "${built_kinds[$run_index]}" in
+        node|java|csharp|kotlin|bash|ruby|php|lua) run_language_entry "$run_target" "${built_kinds[$run_index]}" "${PROJECT_ARGS[@]}" ;;
         script) "$PYTHON_BIN" "$run_target" ;;
         windows)
             if [[ "$HOST_KIND" == "windows" ]]; then

@@ -10,6 +10,7 @@ if not exist "%MSYS2_ROOT%\usr\bin\bash.exe" (
     pause >nul
     exit /b 1
 )
+set "MSYS2_PATH_TYPE=inherit"
 set "MSYSTEM=UCRT64"
 set "CHERE_INVOKING=1"
 set "GHOSTNET_SCRIPT=%~dp0ban.sh"
