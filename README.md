@@ -1,6 +1,6 @@
 # GHOSTNET
 
-**A terminal build launcher for C++, Rust and Python projects.**
+**A terminal build launcher for 17 languages and native project tools.**
 
 A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-key menu. Detect a project, check its tools, build, run and test through its existing build system.
 
@@ -99,6 +99,81 @@ Add the PATH line to your shell configuration to keep it across sessions. This i
 
 You can also run `./tools/ghostnet` directly from the repository. `bash ban.sh` and `bash ban-ru.sh` remain supported and independent.
 
+## Project tools and preserved terminal style
+
+The original boot artwork, green animations, progress spinner and arrow controls remain. New cyan/purple project metadata is added before builds. The old five menu entries keep their positions; project inspection, language listing, creation and recent projects follow them. Redirected output has no animations or ANSI colors. Recognized errors add a `[HINT]` while keeping the compiler's original diagnostics.
+
+```bash
+ghostnet inspect ./project                 # read-only project passport
+ghostnet languages                         # supported language/tool matrix
+ghostnet init --type cmake ./my-project     # refuses to overwrite existing files
+ghostnet init --type go ./go-app
+ghostnet recent                            # last five successful project folders
+ghostnet run ./my-project
+ghostnet test ./my-project
+```
+
+`ghostnet init` opens a template chooser in a terminal. Available types: `cpp`, `cmake`, `c`, `rust`, `python`, `go`, `java`, `javascript`, `typescript`, `csharp`, `bash`, `ruby`, `php`, `lua`, `swift`, `kotlin`, `dart`, `zig`. Creation writes files only; it does not install dependencies. Recent project paths stay in `${XDG_STATE_HOME:-$HOME/.local/state}/ghostnet` on your computer.
+
+This is the actual updated menu and project passport, captured from `ban.sh`:
+
+![ Updated GHOSTNET menu and project passport ](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-expanded-en.png)
+
+```text
+GHOSTNET — main menu (↑/↓ + Enter):
+    Check environment
+    Install tools
+    Build a program
+    Full automatic build
+    Exit
+  > Inspect project
+    Supported languages
+    Create project
+    Recent projects
+
+
+[SCAN COMPLETE]
+  PROJECT    › .
+  LANGUAGES  › C / C++
+  ENGINE     › cmake
+  TARGET     › linux
+  ENTRY      › select after build
+```
+
+## Languages and SDKs
+
+| Language | Files mode | Project engine |
+| --- | --- | --- |
+| C / C++ | gcc C17 / g++ C++17 → executable | Direct linking, CMake, Make |
+| Rust | rustc → executable | Cargo |
+| Python | Syntax check; explicit python3 run | pyproject.toml / unittest |
+| Go | go build → executable | go.mod / go build, run, test |
+| Java | javac check; java source launch (JDK 11+) | Maven / Gradle |
+| JavaScript | node --check; node launch | package.json / npm scripts |
+| TypeScript | tsc → generated JS; node launch | package.json / npm scripts |
+| C# | Generated .NET SDK project → DLL; dotnet launch | Root .csproj / dotnet |
+| Bash | bash -n; bash launch | Standalone |
+| Ruby | ruby -c; ruby launch | Standalone |
+| PHP | php -l; php launch | Standalone |
+| Lua | luac -p; lua launch | Standalone |
+| Swift | swiftc → executable | SwiftPM |
+| Kotlin | kotlinc → JAR; java launch | Gradle |
+| Dart | dart compile exe | Standalone |
+| Zig | zig build-exe | Zig build system |
+
+Only the SDKs needed by the selected project are checked. The installer keeps its base C/C++/Rust/Python tools; it does not download 17 SDKs. `--install-deps` offers supported system packages; SDKs without a suitable mapping show a manual setup link. Install the full SDK, including compiler tools, then reopen the terminal. Windows launchers inherit your Windows PATH so existing Go, Node, JDK and .NET installations are usable from MSYS2. macOS Homebrew `openjdk` may require adding its `bin` to PATH.
+
+For the TypeScript template, install project dependencies once:
+
+```bash
+ghostnet init --type typescript ./web-tool
+cd web-tool
+npm install
+ghostnet run .
+```
+
+GHOSTNET does not run `npm install`, pip, pub or Gradle/Maven dependency edits automatically. Project build tools perform their normal dependency resolution. For Maven/Gradle, configure an executable JAR and select it with `--run-file target/app.jar` or `--run-file build/libs/app.jar`; libraries have no inferred entry. Go `--run-file` selects a relative package directory, .NET selects a `.csproj`, and Swift selects a product name. Project arguments use repeated `arg=` lines in `ghostnet.conf`. In files mode, select the actual output displayed by the build when several results exist. Swift, Kotlin, Dart, Zig and .NET availability depends on the SDK's supported host and architecture.
+
 ## Project detection and commands
 
 ```bash
@@ -117,6 +192,13 @@ Auto detection uses this order:
 | `Cargo.toml` | Cargo build / run / test |
 | `pyproject.toml` | Python syntax checks / explicit entry / unittest in `tests/` |
 | `GNUmakefile`, `Makefile`, `makefile` | Make default target / explicit entry / `make test` |
+| `go.mod` | Go build / run / test |
+| `package.json` | npm scripts: build / start / test |
+| `*.csproj` (root) | dotnet build / run / test |
+| `pom.xml` | Maven package / explicit JAR entry / test |
+| `build.gradle`, `build.gradle.kts` | Gradle build / explicit entry / test |
+| `Package.swift` | SwiftPM build / run / test |
+| `build.zig` | Zig build / selected executable / build test |
 | No descriptor | Independent source files; interactive users can choose one C++ project |
 
 For one related C++ program without a build file:
@@ -125,11 +207,11 @@ For one related C++ program without a build file:
 ghostnet run --mode project ./project
 ```
 
-All immediate `.cpp`, `.cc`, `.cxx` files are linked together. Headers are included by the sources, not compiled separately. Outputs go to `.ghostnet-build/<platform>/program`. Multiple `main()` functions mean these are separate programs: use `--mode files` instead.
+All immediate `.c`, `.cpp`, `.cc`, `.cxx` files are linked together. C sources are compiled as C17 and linked with C++ objects when needed. Headers are included by the sources, not compiled separately. Outputs go to `.ghostnet-build/<platform>/program`. Multiple `main()` functions mean these are separate programs: use `--mode files` instead.
 
-CMake, Make, Cargo and Python project modes currently support **native builds only**. Standalone files and the direct C++ project builder retain Windows cross-build support. `--mode cmake|make|cargo|python` forces a builder; `--mode files` overrides project detection.
+CMake, Make, Cargo and Python project modes currently support **native builds only**. Standalone C/C++ and Rust, and the direct C/C++ project builder, retain Windows cross-build support. All additional language adapters and project engines build for the native host only. `--mode cmake|make|cargo|python|go|node|dotnet|maven|gradle|swift|zig` forces a builder; `--mode files` overrides project detection.
 
-CMake and Make may produce multiple executables, so GHOSTNET requires the intended one:
+CMake, Make and Zig outputs are detected after building. A unique executable is selected automatically; multiple results open an arrow-key chooser in a terminal. The choice is remembered in `.ghostnet-build/run-entry`. Without a terminal, specify the intended entry:
 
 ```bash
 ghostnet run --run-file '.ghostnet-build/{target}/app{exe}' ./cmake-project
@@ -153,11 +235,11 @@ run=launcher.py
 arg=Hello from GHOSTNET
 ```
 
-Supported builders: `cpp`, `cmake`, `make`, `cargo`, `python`, `none`. Repeat `source`, `include` and `arg` as needed. Sources are exact relative paths; nested folders are supported by listing files. `output` is an executable basename under the generated build folder. `run` is a relative entry path. `builder=none` skips compilation for a Python/application launcher. Values may contain spaces; do not wrap them in quotes. There is no variable expansion or shell evaluation. Lines starting with `#` are comments. Third-party C++ libraries should be described by CMake/Make instead of this small configuration.
+Supported builders: `cpp`, `cmake`, `make`, `cargo`, `python`, `none`, `go`, `node`, `dotnet`, `maven`, `gradle`, `swift`, `zig`. Repeat `source`, `include` and `arg` as needed. Sources are exact relative paths; nested folders are supported by listing files. `output` is an executable basename under the generated build folder. `run` is a relative entry path. `builder=none` skips compilation for a Python/application launcher. Values may contain spaces; do not wrap them in quotes. There is no variable expansion or shell evaluation. Lines starting with `#` are comments. Third-party C++ libraries should be described by CMake/Make instead of this small configuration.
 
 ## What it builds
 
-In `--mode files`, GHOSTNET builds each immediate `.cpp`, `.cc`, `.cxx`, `.py` and `.rs` file independently. Subfolders are not scanned in this mode.
+In `--mode files`, each immediate source file from the language table is built or validated independently. Subfolders are not scanned in this mode. Use a project descriptor for related sources and dependencies.
 
 | Source | Action | Result |
 | --- | --- | --- |
@@ -225,7 +307,7 @@ Advanced environment settings:
 
 | Variable | Purpose |
 | --- | --- |
-| `BAN_SOURCE_FILE` | Process one `.cpp`, `.py` or `.rs` file instead of scanning a folder |
+| `BAN_SOURCE_FILE` | Process one supported source file instead of scanning a folder |
 | `BAN_TARGET_DIR` | Default project folder |
 | `BAN_RUN_FILE` | Select a particular result for `--run` |
 | `BAN_WIN_METHOD` | Windows C++ strategy: `auto`, `1` or `2` |
