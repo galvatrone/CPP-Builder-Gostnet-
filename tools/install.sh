@@ -9,13 +9,6 @@ esac
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 payload_root="$root"
 [[ -f "$payload_root/ban.sh" ]] || payload_root="$root/.."
-# No system changes, downloads or package-manager bootstrap.
-mkdir -p -- "$prefix/bin" "$prefix/share/ghostnet"
-for script in ban.sh ban-ru.sh; do
-    install -m 755 "$payload_root/$script" "$prefix/share/ghostnet/$script"
-done
-for command in ghostnet ghostnet-ru; do
-    install -m 755 "$root/$command" "$prefix/bin/$command"
-done
-printf 'Installed GHOSTNET into %s\n' "$prefix"
+# Stage complete payloads and switch metadata atomically; no downloads or tasks here.
+python3 "$root/ghostnet-update.py" --root "$prefix" install --source "$payload_root" --helpers "$root"
 printf 'Add %s/bin to PATH, then run: ghostnet\n' "$prefix"

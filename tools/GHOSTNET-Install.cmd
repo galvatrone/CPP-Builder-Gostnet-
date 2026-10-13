@@ -4,7 +4,7 @@ set "GHOSTNET_INSTALLER=%~f0"
 set "GHOSTNET_YES=0"
 set "GHOSTNET_NO_LAUNCH=0"
 set "GHOSTNET_UPDATE=0"
-set "GHOSTNET_VERSION=v1.3.0"
+set "GHOSTNET_VERSION=v1.4.0"
 set "GHOSTNET_APP_DIR=%LOCALAPPDATA%\GHOSTNET"
 :parse
 if "%~1"=="" goto execute
@@ -138,7 +138,7 @@ function Write-Bridges([string]$Root) {
 param([string]$Language,[Parameter(ValueFromRemainingArguments=$true)][string[]]$ForwardedArgs)
 $ErrorActionPreference='Stop'
 $Root=Split-Path $PSScriptRoot -Parent
-if ($ForwardedArgs.Count -gt 0 -and $ForwardedArgs[0] -eq 'update') {
+if ($ForwardedArgs.Count -gt 0 -and $ForwardedArgs[0] -eq 'update' -and !(Test-Path -LiteralPath (Join-Path $Root 'ghostnet-update.py'))) {
     $Arguments=@('--update','--dir',$Root)
     if ($ForwardedArgs.Count -gt 1) { $Arguments+=$ForwardedArgs[1..($ForwardedArgs.Count-1)] }
     & (Join-Path $Root 'GHOSTNET-Install.cmd') @Arguments
@@ -147,6 +147,19 @@ if ($ForwardedArgs.Count -gt 0 -and $ForwardedArgs[0] -eq 'update') {
 $State=Get-Content -LiteralPath (Join-Path $Root 'installation.json') -Raw | ConvertFrom-Json
 $Bash=Join-Path $State.MsysRoot 'usr\bin\bash.exe'
 if (!(Test-Path -LiteralPath $Bash)) { Write-Error 'MSYS2 is missing. Run GHOSTNET-Install.cmd again.'; exit 1 }
+$env:MSYS2_PATH_TYPE='inherit';$env:MSYSTEM='UCRT64';$env:CHERE_INVOKING='1'
+$Helper=Join-Path $Root 'ghostnet-update.py'
+if (Test-Path -LiteralPath $Helper) {
+    $env:GHOSTNET_ROOT=$Root; $env:GHOSTNET_UPDATE_HELPER=$Helper
+    if ($ForwardedArgs.Count -gt 0 -and $ForwardedArgs[0] -in @('update','auto-update')) {
+        & $Bash --login -c 'exec python "$@"' ghostnet-updater $Helper --root $Root @ForwardedArgs
+        exit $LASTEXITCODE
+    }
+    if ($ForwardedArgs.Count -eq 0 -or $ForwardedArgs[0] -notin @('--version','--help','-h')) {
+        & $Bash --login -c 'exec python "$@"' ghostnet-updater $Helper --root $Root --startup 2>$null | Out-Null
+        $State=Get-Content -LiteralPath (Join-Path $Root 'installation.json') -Raw | ConvertFrom-Json
+    }
+}
 $Script='ban.sh';if ($Language -eq 'ru') { $Script='ban-ru.sh' }
 $Script=(Join-Path $State.Payload $Script).Replace('\','/')
 $env:MSYS2_PATH_TYPE='inherit';$env:MSYSTEM='UCRT64';$env:CHERE_INVOKING='1'
@@ -224,6 +237,13 @@ try {
     if ([IO.Path]::GetFullPath($NewInstaller) -ne [IO.Path]::GetFullPath($Destination)) { Copy-Item -LiteralPath $NewInstaller -Destination $Destination -Force }
     Add-UserPath (Join-Path $Root 'bin')
     Write-ActiveState $Root $Version $Payload $Msys
+    $HelperSource=Join-Path $Payload 'ghostnet-update.py'
+    if (Test-Path -LiteralPath $HelperSource) {
+        Copy-Item -LiteralPath $HelperSource -Destination (Join-Path $Root 'ghostnet-update.py') -Force
+        if ($env:GHOSTNET_SKIP_SCHEDULE -ne '1') {
+            & (Join-Path $Msys 'usr\bin\bash.exe') --login -c 'exec python "$@"' ghostnet-updater (Join-Path $Root 'ghostnet-update.py') --root $Root auto-update enable | Out-Host
+        }
+    }
     Write-Host "Installed $Version. Open a new terminal and run ghostnet or ghostnet-ru."
     if ($env:GHOSTNET_NO_LAUNCH -ne '1') {
         & (Join-Path $Root 'bin\ghostnet.cmd')

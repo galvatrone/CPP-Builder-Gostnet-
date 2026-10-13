@@ -1,6 +1,6 @@
 # GHOSTNET
 
-**A terminal build launcher for 17 languages and native project tools.**
+**Prepare dependencies, build and run projects in 17 languages through their native tools.**
 
 A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-key menu. Detect a project, check its tools, build, run and test through its existing build system.
 
@@ -16,7 +16,7 @@ A Watch Dogs 2 inspired terminal: green signals, animated progress and an arrow-
 bash -c 'f=$(mktemp -d) || exit; trap '\''rm -rf "$f"'\'' EXIT; curl -fsSL https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/latest/download/GHOSTNET-Install.sh -o "$f/GHOSTNET-Install.sh" && bash "$f/GHOSTNET-Install.sh"'
 ```
 
-The installer detects the OS and installs missing Bash 4.4+, C++ compiler, Python, Rust/Cargo, CMake, Ninja and Make. Linux supports apt, dnf and pacman (sudo may be required). macOS uses Homebrew and installs it when missing; follow Apple's command line tools dialog if prompted, then rerun. Project-specific libraries and Python packages remain managed by your project.
+The installer detects the OS and installs missing Bash 4.4+, C++ compiler, Python, Rust/Cargo, CMake, Ninja and Make. Linux supports apt, dnf and pacman (sudo may be required). macOS uses Homebrew and installs it when missing; follow Apple's command line tools dialog if prompted, then rerun. Use `ghostnet setup .` separately to prepare project libraries and Python packages.
 
 **Windows 10/11 x64 — paste into PowerShell:**
 
@@ -81,7 +81,7 @@ For manual ZIP setup, install [MSYS2](https://www.msys2.org/) and open `ban.cmd`
 
 For the Russian interface, use `ban-ru.sh`, `ban-ru.command` or `ban-ru.cmd`. There is no language-selection menu.
 
-Use **↑ / ↓** to move and **Enter** to select. The main menu offers dependency checking, installation, building, and an automatic check-and-build flow. Choose a project folder and the platform, then decide whether to launch a result. Animations turn off automatically outside an interactive terminal; `--no-animation` disables them explicitly.
+Use **↑ / ↓** within a column, **← / →** between columns and **Enter** to select. Narrow terminals use a vertical menu. The main menu offers dependency checking, installation, building, and an automatic check-and-build flow. Choose a project folder and the platform, then decide whether to launch a result. Animations turn off automatically outside an interactive terminal; `--no-animation` disables them explicitly.
 
 Repository launchers and installers live in `tools/`; in release ZIPs they sit next to `ban.sh`. Documentation images stay in `assets/` and are excluded from ZIPs.
 
@@ -120,16 +120,13 @@ This is the actual updated menu and project passport, captured from `ban.sh`:
 ![ Updated GHOSTNET menu and project passport ](https://raw.githubusercontent.com/galvatrone/CPP-Builder-Gostnet-/main/assets/ghostnet-expanded-en.png)
 
 ```text
-GHOSTNET — main menu (↑/↓ + Enter):
-    Check environment
-    Install tools
-    Build a program
-    Full automatic build
-    Exit
-  > Inspect project
-    Supported languages
-    Create project
-    Recent projects
+GHOSTNET — main menu (↑/↓ · ←/→ + Enter):
+  BUILD & TOOLS                                    PROJECTS & UPDATES
+    Check environment                              > Inspect project
+    Install tools                                    Supported languages
+    Build a program                                  Create project
+    Full automatic build                             Recent projects
+    Exit                                             Updates
 
 
 [SCAN COMPLETE]
@@ -139,6 +136,57 @@ GHOSTNET — main menu (↑/↓ + Enter):
   TARGET     › linux
   ENTRY      › select after build
 ```
+
+## Prepare a project, then work on it
+
+```bash
+ghostnet doctor .
+ghostnet setup .
+ghostnet run --run-file app.py .
+ghostnet watch .
+ghostnet clean .
+```
+
+`doctor` reports required tool paths and versions without installing or building anything. For Python it checks the project environment, installed distributions, requirement versions and environment markers. Requirements using local paths or pip directives need manual review; `setup` supports them through pip.
+
+`setup` is an explicit dependency installation command. It may download packages and execute the package manager's normal project hooks. It creates or reuses `.venv`, installs `requirements.txt` through that environment's Python, and subsequent `run` uses the same interpreter. A `pyproject.toml` with `[build-system]` can be installed with pip when no requirements file exists. An existing `.venv` must be a real virtual environment. Installation failures retain the package manager's diagnostic output.
+
+| Project | `setup` delegates to |
+| --- | --- |
+| Python | `.venv` + `python -m pip install -r requirements.txt`, or `pip install .` for a build-system project |
+| Rust | `cargo fetch --locked` when Cargo.lock exists; otherwise `cargo fetch` |
+| JavaScript / TypeScript | `npm ci` with an npm lock file; otherwise `npm install` |
+| Go | `go mod download` |
+| C# | `dotnet restore` |
+| Maven / Gradle | Project wrapper or installed tool: `dependency:resolve` / `dependencies` |
+| Swift | `swift package resolve` |
+| CMake | Configure into `.ghostnet-build/<host>`; dependencies follow the project's existing CMake rules |
+| Other C/C++ or scripts | Follow the project's library installation instructions |
+
+`watch` builds and runs immediately, then restarts after source or configuration changes settle. It ignores `.git`, `.venv`, `node_modules`, compiler outputs and GHOSTNET state. A failed build waits for another change; Ctrl+C stops the running program. It requires Python and supports native builds.
+
+`clean` removes recorded GHOSTNET outputs only when their contents still match the build inventory. It preserves sources, `.venv`, unrecorded files and modified outputs. External builders' output directories such as Cargo's `target` remain owned by those builders; use their native clean command when needed.
+
+Build and Python dependency installation failures save a report with the command, tool paths/versions and diagnostic log. The `[REPORT]` line gives its path under `${XDG_STATE_HOME:-~/.local/state}/ghostnet/reports`.
+
+## Shell help
+
+```bash
+# Bash: add this to ~/.bashrc
+eval "$(ghostnet completion bash)"
+# Zsh: after compinit, add this to ~/.zshrc
+eval "$(ghostnet completion zsh)"
+# Installed Unix manual
+man ghostnet
+```
+
+PowerShell profile:
+
+```powershell
+ghostnet completion powershell | Out-String | Invoke-Expression
+```
+
+Completion definitions and the manual are included in release ZIPs. If your custom installation prefix is outside the manual search path, use `MANPATH="$HOME/.local/share/man:${MANPATH:-}" man ghostnet`, replacing the prefix as needed.
 
 ## Languages and SDKs
 
@@ -172,7 +220,7 @@ npm install
 ghostnet run .
 ```
 
-GHOSTNET does not run `npm install`, pip, pub or Gradle/Maven dependency edits automatically. Project build tools perform their normal dependency resolution. For Maven/Gradle, configure an executable JAR and select it with `--run-file target/app.jar` or `--run-file build/libs/app.jar`; libraries have no inferred entry. Go `--run-file` selects a relative package directory, .NET selects a `.csproj`, and Swift selects a product name. Project arguments use repeated `arg=` lines in `ghostnet.conf`. In files mode, select the actual output displayed by the build when several results exist. Swift, Kotlin, Dart, Zig and .NET availability depends on the SDK's supported host and architecture.
+`build` and `run` keep dependency installation explicit: use `ghostnet setup .` for npm/pip and supported project tools. Pub and dependency-file edits remain manual. Project build tools perform their normal dependency resolution. For Maven/Gradle, configure an executable JAR and select it with `--run-file target/app.jar` or `--run-file build/libs/app.jar`; libraries have no inferred entry. Go `--run-file` selects a relative package directory, .NET selects a `.csproj`, and Swift selects a product name. Project arguments use repeated `arg=` lines in `ghostnet.conf`. In files mode, select the actual output displayed by the build when several results exist. Swift, Kotlin, Dart, Zig and .NET availability depends on the SDK's supported host and architecture.
 
 ## Project detection and commands
 
@@ -217,7 +265,7 @@ CMake, Make and Zig outputs are detected after building. A unique executable is 
 ghostnet run --run-file '.ghostnet-build/{target}/app{exe}' ./cmake-project
 ```
 
-`{target}` becomes `linux`, `macos` or `windows`; `{exe}` becomes `.exe` on Windows and is empty elsewhere. Cargo honors its own default binary / `default-run` configuration. Python requires `--run-file app.py`, `run=` in the configuration, or a root `__main__.py`. Existing `.venv/bin/python` or `.venv/Scripts/python.exe` is used automatically. Python dependencies and packaging remain managed by the project; `pyproject.toml` detection does not run pip. Python checks cover root scripts and the selected Python entry; tests use standard `unittest`, not an inferred pytest setup.
+`{target}` becomes `linux`, `macos` or `windows`; `{exe}` becomes `.exe` on Windows and is empty elsewhere. Cargo honors its own default binary / `default-run` configuration. Python requires `--run-file app.py`, `run=` in the configuration, or a root `__main__.py`. Existing `.venv/bin/python` or `.venv/Scripts/python.exe` is used automatically. Python dependencies can be prepared with `ghostnet setup .`; project detection and normal builds do not run pip. Python checks cover root scripts and the selected Python entry; tests use standard `unittest`, not an inferred pytest setup.
 
 ## C++ / Python project configuration
 
@@ -346,12 +394,33 @@ The previews capture actual GHOSTNET terminal output.
 
 The scripts remain standalone Bash entry points. [GitHub Actions](https://github.com/galvatrone/CPP-Builder-Gostnet-/actions/workflows/platforms.yml) runs standalone and multi-source C++ builds, CMake/Make/Cargo project builds and tests, Python project validation and execution, and launcher checks on Linux, macOS and Windows/MSYS2. The Linux job also checks Windows cross-compilation and output-name collisions.
 
-## Windows updates
+## Automatic updates
+
+Installer-managed commands check for a newer stable release at startup and install it without another question. Checks are throttled to once per 15 minutes. Offline checks and failed downloads do not prevent the existing version from running. A downloaded ZIP must pass SHA-256 and archive validation before the active payload changes; previous versions are retained.
+
+The OS installer also attempts to register a daily task in the current user context: a systemd user timer on Linux, a LaunchAgent on macOS, or Windows Task Scheduler. Registration failures are reported in status; the launcher still works. The scheduled task runs when the user session permits it and never installs compilers or language SDKs.
+
+```bash
+ghostnet auto-update status
+ghostnet auto-update disable
+ghostnet auto-update enable
+ghostnet update
+```
+
+`disable` stops both startup updates and the scheduled task. A standalone downloaded `.sh` or repository checkout does not install background tasks. The local `tools/install.sh` installs the command only; use the OS installer or `auto-update enable` to register the schedule.
+
+For AUR/package-managed installations, automatic checks report an available release and keep package-owned files intact. Manual `ghostnet update` delegates to `yay -S --needed ghostnet` when yay is installed; system package permissions and normal yay confirmation still apply.
+
+## Arch Linux / AUR
+
+The package recipe is in `tools/aur/PKGBUILD` and `tools/aur/.SRCINFO`. It installs the commands, completions and manual and leaves language SDKs as optional dependencies. **AUR publication is pending: an AUR account is required, and `yay -S ghostnet` is not available until the package is submitted.** The recipe references a versioned Linux release ZIP with its checksum.
+
+## Release updates (Linux, macOS and Windows)
 
 ```powershell
 ghostnet update
 ```
 
-The updater selects the latest published stable release and uses its versioned ZIP and SHA256SUMS. Staging happens before activation; a failed download or checksum does not replace the active version. Previous payload folders remain under `%LOCALAPPDATA%\GHOSTNET\versions`.
+The updater selects the latest published stable release and uses its versioned ZIP and SHA256SUMS. Staging happens before activation; a failed download or checksum does not replace the active version. Previous payload folders remain under `%LOCALAPPDATA%\GHOSTNET\versions` on Windows and `<prefix>/share/ghostnet/versions` on Unix.
 
 Installer options: `--yes`, `--no-launch`, `--version vX.Y.Z`, `--dir PATH`, `--msys2-root PATH`. Default GHOSTNET folder: `%LOCALAPPDATA%\GHOSTNET`; default MSYS2: `C:\msys64`. Fresh MSYS2 installation uses a pinned official x64 installer and verifies its SHA-256. Windows x64 10/11, built-in curl and Windows PowerShell are required. MSYS2 setup may require elevation. User PATH is updated without setx; reopen existing terminals to pick up the change.

@@ -31,11 +31,11 @@ INIT_TYPE=""
 
 usage() {
     cat <<'HELP'
-Commands: ghostnet build|run|test|check|inspect|languages|init|recent [options] [folder]
+Commands: ghostnet build|run|test|doctor|setup|watch|clean|completion|check|inspect|languages|init|recent [options] [folder]
 
 GHOSTNET — build helper for Linux, Windows and macOS
 
-Run without arguments for the arrow-key menu (↑/↓ and Enter).
+Run without arguments for the arrow-key menu (↑/↓, ←/→ and Enter).
 
   --type TYPE        Template for ghostnet init
   --check            Check required tools
@@ -47,16 +47,27 @@ Run without arguments for the arrow-key menu (↑/↓ and Enter).
   --run              Run the program after a successful build
   --yes              Allow package installation without another confirmation
   --no-animation     Disable animations
-  --version          GHOSTNET 1.3.0
+  --version          GHOSTNET 1.4.0
   --help             Show help
 
 Example: bash ban.sh --auto --target linux --run ./project
 Without --yes, package installation requires confirmation in a terminal.
+Examples:
+  ghostnet doctor .                  Diagnose tools and project dependencies
+  ghostnet setup .                   Prepare project dependencies explicitly
+  ghostnet run --run-file app.py .    Use the project .venv when available
+  ghostnet watch .                   Restart after source changes; Ctrl+C stops
+  ghostnet clean .                   Remove unchanged recorded outputs
+  ghostnet completion bash           Print shell completion definitions
+  ghostnet update                    Update an installed release
+  ghostnet auto-update status        Show automatic update settings
 HELP
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        completion) ACTION="completion" ;;
+        doctor|setup|watch|clean) ACTION="$1"; TARGET_DIR_PRESET="${TARGET_DIR_PRESET:-.}" ;;
         recent) ACTION="recent" ;;
         init) ACTION="init" ;;
         --type) [[ $# -ge 2 ]] || { printf '[ERROR] --type requires a value.\n' >&2; exit 2; }; INIT_TYPE="$2"; shift ;;
@@ -84,7 +95,7 @@ while [[ $# -gt 0 ]]; do
         --run) RUN_AFTER=1; RUN_CHOICE_SET=1 ;;
         --yes) ASSUME_YES=1 ;;
         --no-animation) BAN_NO_ANIMATION=1 ;;
-        --version) printf 'GHOSTNET 1.3.0\n'; exit 0 ;;
+        --version) printf 'GHOSTNET 1.4.0\n'; exit 0 ;;
         --help|-h) usage; exit 0 ;;
         --)
             shift
@@ -109,6 +120,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$BUILD_MODE" in auto|files|project|cmake|make|cargo|python|go|node|dotnet|maven|gradle|swift|zig) ;; *) printf '[ERROR] Invalid build mode: %s\n' "$BUILD_MODE" >&2; exit 2 ;; esac
+
+if [[ "$ACTION" == completion ]]; then
+    case "${TARGET_DIR:-bash}" in bash) completion_file=ghostnet.bash ;; zsh) completion_file=ghostnet.zsh ;; powershell) completion_file=ghostnet.ps1 ;; *) printf '[ERROR] completion: bash, zsh, powershell\n' >&2; exit 2 ;; esac
+    completion_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    [[ -f "$completion_root/$completion_file" ]] || completion_root+="/tools"
+    [[ -f "$completion_root/$completion_file" ]] || { printf '[ERROR] Download the release ZIP to use shell completion.\n' >&2; exit 1; }
+    cat -- "$completion_root/$completion_file"; exit $?
+fi
 
 ANIMATION_ENABLED=0
 if [[ "${BAN_NO_ANIMATION:-0}" != "1" && -t 1 && -n "${TERM:-}" && "${TERM:-}" != "dumb" ]]; then
@@ -212,6 +231,7 @@ BUILD_PID=""
 BUILD_LOG=""
 
 cleanup_terminal() {
+    [[ -z "${CLEAN_BASE:-}" ]] || rm -f -- "$CLEAN_BASE"
     if [[ -n "$BUILD_PID" ]]; then
         kill "$BUILD_PID" 2>/dev/null || true
         wait "$BUILD_PID" 2>/dev/null || true
@@ -250,6 +270,26 @@ diagnostic_tip() {
         esac
     done < "$log"
     [[ -z "$tip" ]] || printf '%b[HINT]%b %s\n' "$YELLOW" "$RESET" "$tip"
+    return 0
+}
+
+save_error_report() {
+    local label="$1" log="$2" status="$3" folder report tool
+    shift 3
+    folder="$(state_folder)/reports"
+    [[ ! -L "$(state_folder)" && ! -L "$folder" ]] || return 0
+    (umask 077; mkdir -p -- "$folder") 2>/dev/null || return 0
+    report=$(umask 077; mktemp "$folder/error.XXXXXX.log") || return 0
+    {
+        printf 'GHOSTNET 1.4.0\nHost: %s\nProject: %s\nOperation: %s\nExit: %s\nCommand: ' "$HOST_SYSTEM" "$TARGET_DIR" "$label" "$status"
+        printf '%q ' "$@"; printf '\n\nTools:\n'
+        for tool in "${required_compilers[@]}"; do
+            command -v "$tool" || continue
+            case "${tool##*/}" in java|javac) "$tool" -version 2>&1 | head -n 1 ;; *) "$tool" --version 2>&1 | head -n 1 ;; esac
+        done
+        printf '\nLog:\n'; cat -- "$log"
+    } > "$report" 2>&1
+    printf '[REPORT] %s\n' "$report"
     return 0
 }
 
@@ -296,7 +336,7 @@ run_build() {
     fi
     if [[ -n "$BUILD_LOG" ]]; then
         [[ "$ANIMATION_ENABLED" -eq 0 ]] || cat -- "$BUILD_LOG"
-        [[ "$status" -eq 0 ]] || diagnostic_tip "$label" "$BUILD_LOG"
+        [[ "$status" -eq 0 ]] || { diagnostic_tip "$label" "$BUILD_LOG"; save_error_report "$label" "$BUILD_LOG" "$status" "$@"; }
         rm -f -- "$BUILD_LOG"
         BUILD_LOG=""
     fi
@@ -355,6 +395,58 @@ choose_menu() {
     printf "\n"
 }
 
+
+# Preserve action indices while grouping the main dashboard into two columns.
+choose_dashboard() {
+    local title="$1" selected="$2" key extra row left right pad width columns
+    shift 2
+    local options=("$@")
+    columns=${COLUMNS:-80}
+    if [[ "$columns" -lt 72 ]]; then choose_menu "$title" "$selected" "${options[@]}"; return; fi
+    width=$(( (columns-6)/2 )); [[ "$width" -le 48 ]] || width=48
+    tput civis 2>/dev/null || true
+    printf '%s\n' "$title"
+    left="$(ui 'BUILD & TOOLS' 'СБОРКА И ИНСТРУМЕНТЫ')"
+    pad=$((width-${#left})); [[ "$pad" -ge 0 ]] || pad=0
+    printf '%b  %s%*s  %b%s%b\n' "$PURPLE" "$left" "$pad" '' "$BLUE" "$(ui 'PROJECTS & UPDATES' 'ПРОЕКТЫ И ОБНОВЛЕНИЯ')" "$RESET"
+    while true; do
+        for ((row=0;row<5;row++)); do
+            left="  ${options[$row]}"; right="  ${options[$((row+5))]}"
+            [[ "$selected" != "$row" ]] || left="> ${options[$row]}"
+            [[ "$selected" != "$((row+5))" ]] || right="> ${options[$((row+5))]}"
+            pad=$((width-${#left})); [[ "$pad" -ge 0 ]] || pad=0
+            if [[ "$selected" == "$row" ]]; then printf '  %b%s%b' "$GREEN" "$left" "$RESET"; else printf '  %s' "$left"; fi
+            printf '%*s  ' "$pad" ''
+            if [[ "$selected" == "$((row+5))" ]]; then printf '%b%s%b\n' "$GREEN" "$right" "$RESET"; else printf '%s\n' "$right"; fi
+        done
+        IFS= read -rsn1 key || exit 1
+        if [[ "$key" == $'\x1b' ]]; then IFS= read -rsn2 -t 0.2 extra || true; key+="$extra"; fi
+        case "$key" in
+            $'\x1b[A') selected=$((selected/5*5+(selected%5+4)%5)) ;;
+            $'\x1b[B') selected=$((selected/5*5+(selected%5+1)%5)) ;;
+            $'\x1b[C'|$'\x1b[D') selected=$(( (selected+5)%10 )) ;;
+            '') break ;;
+        esac
+        printf '\033[5A\r'
+    done
+    MENU_SELECTED="$selected";tput cnorm 2>/dev/null || true;printf '\n'
+}
+update_menu() {
+    if [[ -z "${GHOSTNET_ROOT:-}" || ! -f "${GHOSTNET_UPDATE_HELPER:-}" ]]; then
+        printf '[UPDATE] %s\n' "$(ui 'Install the ghostnet command first to manage updates.' 'Сначала установите команду ghostnet для управления обновлениями.')"
+        return
+    fi
+    choose_menu "$(ui 'Updates:' 'Обновления:')" 0 \
+        "$(ui 'Update now' 'Обновить сейчас')" "$(ui 'Automatic update status' 'Состояние автообновления')" \
+        "$(ui 'Enable startup and daily updates' 'Включить при запуске и ежедневно')" \
+        "$(ui 'Disable automatic updates' 'Отключить автообновление')" "$(ui 'Back' 'Назад')"
+    case "$MENU_SELECTED" in
+        0) "$PYTHON_BIN" "$GHOSTNET_UPDATE_HELPER" --root "$GHOSTNET_ROOT" update ;;
+        1) "$PYTHON_BIN" "$GHOSTNET_UPDATE_HELPER" --root "$GHOSTNET_ROOT" auto-update status ;;
+        2) "$PYTHON_BIN" "$GHOSTNET_UPDATE_HELPER" --root "$GHOSTNET_ROOT" auto-update enable ;;
+        3) "$PYTHON_BIN" "$GHOSTNET_UPDATE_HELPER" --root "$GHOSTNET_ROOT" auto-update disable ;;
+    esac
+}
 
 # Native language adapters: build/validate first, execute only on request.
 go_command() {
@@ -761,7 +853,8 @@ if [[ "$ACTION" == languages ]]; then languages_list; exit 0; fi
 
 if [[ -z "$ACTION" ]]; then
     if [[ -t 0 && -t 1 && -z "$BUILD_TARGET" ]]; then
-        choose_menu "GHOSTNET — main menu (↑/↓ + Enter):" 2 \
+        while true; do
+        choose_dashboard "GHOSTNET — main menu (↑/↓ · ←/→ + Enter):" 2 \
             "Check environment" \
             "Install tools" \
             "Build a program" \
@@ -770,8 +863,10 @@ if [[ -z "$ACTION" ]]; then
             "$(ui 'Inspect project' 'Паспорт проекта')" \
             "$(ui 'Supported languages' 'Поддерживаемые языки')" \
             "$(ui 'Create project' 'Создать проект')" \
-            "$(ui 'Recent projects' 'Недавние проекты')"
+            "$(ui 'Recent projects' 'Недавние проекты')" \
+            "$(ui 'Updates' 'Обновления')"
         case "$MENU_SELECTED" in
+            9) update_menu; continue ;;
             0) ACTION="check" ;;
             1) ACTION="install" ;;
             2) ACTION="build" ;;
@@ -782,6 +877,8 @@ if [[ -z "$ACTION" ]]; then
             7) ACTION="init" ;;
             8) ACTION="recent" ;;
         esac
+        break
+        done
     else
         ACTION="build"
     fi
@@ -792,11 +889,11 @@ if [[ "$ACTION" == recent ]]; then recent_projects; fi
 if [[ "$ACTION" == init ]]; then init_project; exit $?; fi
 
 case "$ACTION" in
-    check|install|build|auto|test|inspect) ;;
+    check|install|build|auto|test|inspect|doctor|setup|watch|clean) ;;
     *) printf '[ERROR] Invalid mode: %s\n' "$ACTION" >&2; exit 2 ;;
 esac
 
-[[ "$ACTION" != inspect ]] || BUILD_TARGET="${BUILD_TARGET:-native}"
+[[ "$ACTION" != inspect && "$ACTION" != doctor && "$ACTION" != setup && "$ACTION" != watch && "$ACTION" != clean ]] || BUILD_TARGET="${BUILD_TARGET:-native}"
 
 if [[ -z "$BUILD_TARGET" || "$BUILD_TARGET" == "native" ]]; then
     if [[ "$BUILD_TARGET" == "native" ]]; then
@@ -890,6 +987,8 @@ else
     has_cpp=1 has_py=1 has_rs=1
 fi
 
+[[ ! -f "$TARGET_DIR/requirements.txt" ]] || has_py=1
+
 # Literal project configuration: values are never evaluated as shell code.
 project_error() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 relative_project_path() {
@@ -923,7 +1022,7 @@ if [[ "$BUILD_MODE" != "files" ]]; then
         PROJECT_BUILDER="cmake"
     elif [[ -f "$TARGET_DIR/Cargo.toml" ]]; then
         PROJECT_BUILDER="cargo"
-    elif [[ -f "$TARGET_DIR/pyproject.toml" ]]; then
+    elif [[ -f "$TARGET_DIR/pyproject.toml" || ( -f "$TARGET_DIR/requirements.txt" && "$RUN_FILE" == *.py ) ]]; then
         PROJECT_BUILDER="python"
     elif [[ -f "$TARGET_DIR/GNUmakefile" || -f "$TARGET_DIR/Makefile" || -f "$TARGET_DIR/makefile" ]]; then
         PROJECT_BUILDER="make"
@@ -964,7 +1063,7 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
     elif [[ "$PROJECT_BUILDER" == "cargo" ]]; then
         [[ -f "$TARGET_DIR/Cargo.toml" ]] || project_error "Cargo.toml not found."
     elif [[ "$PROJECT_BUILDER" == "python" ]]; then
-        [[ -f "$TARGET_DIR/pyproject.toml" ]] || project_error "pyproject.toml not found."
+        [[ -f "$TARGET_DIR/pyproject.toml" || -f "$TARGET_DIR/requirements.txt" ]] || project_error "pyproject.toml or requirements.txt not found."
         if [[ -z "$PROJECT_RUN" && -f "$TARGET_DIR/__main__.py" ]]; then PROJECT_RUN="__main__.py"; fi
     elif [[ "$PROJECT_BUILDER" == "cpp" ]]; then
         if [[ ${#PROJECT_SOURCES[@]} -eq 0 ]]; then
@@ -1012,6 +1111,12 @@ if [[ -z "$PROJECT_BUILDER" ]]; then
         case "$src" in *.cpp|*.cc|*.cxx|*.c|*.py|*.rs) continue ;; esac
         [[ "$BUILD_TARGET" != both && ( "$BUILD_TARGET" != windows || "$HOST_KIND" == windows ) ]] || feature_error "$(ui 'New language adapters support --target native only.' 'Новые адаптеры языков поддерживают только --target native.')"
     done
+fi
+# Reuse the project environment for standalone Python as well as project mode.
+if [[ -x "$TARGET_DIR/.venv/bin/python" ]]; then
+    PYTHON_BIN=$(cd -- "$TARGET_DIR" && pwd)/.venv/bin/python
+elif [[ -x "$TARGET_DIR/.venv/Scripts/python.exe" ]]; then
+    PYTHON_BIN=$(cd -- "$TARGET_DIR" && pwd)/.venv/Scripts/python.exe
 fi
 project_passport
 [[ "$ACTION" != inspect ]] || exit 0
@@ -1243,7 +1348,291 @@ install_dependencies() {
     check_dependencies
 }
 
+
+# An output inventory lets clean preserve foreign and subsequently edited files.
+CLEAN_BASE=""
+clean_inventory() {
+    local operation="$1"; shift
+    "$PYTHON_BIN" - "$operation" "$TARGET_DIR" "$(state_folder)" "$CLEAN_BASE" "$@" <<'PYCLEAN'
+import hashlib, json, os, pathlib, stat, sys, tempfile
+operation, folder, state_folder, baseline, *outputs = sys.argv[1:]
+root = pathlib.Path(folder).resolve()
+state = pathlib.Path(state_folder)/'outputs'
+if state.is_symlink() or state.parent.is_symlink(): sys.exit(1)
+manifest = state/(hashlib.sha256(str(root).encode()).hexdigest()+'.json')
+if manifest.is_symlink(): sys.exit(1)
+def signature(path):
+    try:
+        if path.is_symlink() or not path.is_file(): return None
+        info = path.stat()
+        if info.st_nlink != 1: return None
+        return [info.st_size,hashlib.sha256(path.read_bytes()).hexdigest()]
+    except OSError: return None
+def safe_path(name):
+    path = pathlib.Path(name)
+    if path.is_absolute() or '..' in path.parts or not path.parts: return None
+    if any((root/pathlib.Path(*path.parts[:i])).is_symlink() for i in range(1,len(path.parts)+1)): return None
+    return root/path
+def generated():
+    result = {}
+    directory = root/'.ghostnet-build'
+    if directory.is_symlink(): return result
+    source_suffixes = {'.c','.cc','.cpp','.cxx','.h','.hpp','.py','.rs','.go','.java','.ts','.cs','.sh','.rb','.php','.lua','.swift','.kt','.dart','.zig'}
+    for parent, dirs, files in os.walk(directory, followlinks=False):
+        dirs[:] = [d for d in dirs if not pathlib.Path(parent,d).is_symlink()]
+        for name in files:
+            path = pathlib.Path(parent,name)
+            if path.suffix in source_suffixes: continue
+            value = signature(path)
+            if value is not None: result[str(path.relative_to(root))] = value
+    return result
+if operation == 'begin':
+    pathlib.Path(baseline).write_text(json.dumps(generated())); sys.exit(0)
+owned = json.loads(manifest.read_text()) if manifest.exists() else {}
+if not isinstance(owned,dict): raise ValueError('Invalid output inventory')
+if operation == 'record':
+    before = json.loads(pathlib.Path(baseline).read_text()) if baseline else {}
+    for name, value in generated().items():
+        if before.get(name) != value: owned[name] = value
+    for output in outputs:
+        path = pathlib.Path(output).absolute()
+        try: name = str(path.relative_to(root))
+        except ValueError: continue
+        if safe_path(name) is None: continue
+        # Never claim an interpreted source as a generated artifact.
+        if path.suffix in {'.py','.js','.mjs','.cjs','.java','.sh','.rb','.php','.lua'}: continue
+        value = signature(path)
+        if value is not None: owned[name] = value
+else:
+    removed = 0
+    for name,value in list(owned.items()):
+        path = safe_path(name)
+        if path is None: continue
+        if signature(path) == value:
+            path.unlink(); removed += 1
+            parent = path.parent
+            while parent != root and (str(parent).startswith(str(root/'.ghostnet-build')+os.sep) or parent == root/'.ghostnet-build'):
+                try: parent.rmdir()
+                except OSError: break
+                parent = parent.parent
+            del owned[name]
+        elif not path.exists(): del owned[name]
+        else: print('[CLEAN] Preserved modified output:',name)
+    print('[CLEAN]',removed,'files')
+state.mkdir(parents=True,exist_ok=True)
+fd,temporary = tempfile.mkstemp(dir=state,prefix='.outputs-')
+try:
+    with os.fdopen(fd,'w') as stream: json.dump(owned,stream)
+    os.replace(temporary,manifest)
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+PYCLEAN
+}
+
+project_watch() {
+    local launcher
+    launcher=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/${BASH_SOURCE[0]##*/}
+    "$PYTHON_BIN" - "$launcher" "$TARGET_DIR" "$BUILD_MODE" "$RUN_FILE" "$HOST_KIND" "$INTERFACE_LANG" <<'PYWATCH'
+import os, pathlib, signal, subprocess, sys, time
+launcher, folder, mode, entry, host, lang = sys.argv[1:]
+root = pathlib.Path(folder).resolve()
+state = pathlib.Path(os.environ.get('XDG_STATE_HOME',str(pathlib.Path.home()/'.local/state'))).resolve()/'ghostnet'
+ignored = {'.git', '.venv', 'venv', 'node_modules', '.ghostnet-build', '__pycache__', 'target', 'bin', 'obj', '.build', '.gradle', '.dart_tool', 'zig-out', '.zig-cache'}
+suffixes = {'.c','.cc','.cpp','.cxx','.h','.hpp','.hxx','.py','.rs','.go','.java','.js','.mjs','.cjs','.ts','.mts','.cts','.json','.toml','.txt','.cs','.sh','.rb','.php','.lua','.swift','.kt','.dart','.zig','.xml','.gradle','.kts','.cmake','.yaml','.yml','.lock'}
+filenames = {'Makefile','GNUmakefile','makefile','ghostnet.conf'}
+def snapshot():
+    result = {}
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if d not in ignored and not pathlib.Path(directory,d).is_symlink() and pathlib.Path(directory,d).resolve() != state]
+        for name in files:
+            path = pathlib.Path(directory,name)
+            if path.suffix not in suffixes and name not in filenames: continue
+            if path.is_symlink(): continue
+            try:
+                stat = path.stat(); result[str(path.relative_to(root))] = (stat.st_mtime_ns,stat.st_size)
+            except OSError: pass
+    return result
+command = ['bash',launcher,'run','--target','native','--no-animation','--mode',mode]
+if entry: command += ['--run-file',entry]
+command += [str(root)]
+env = dict(os.environ, BAN_NO_ANIMATION='1')
+child = None
+job = None
+stopping = False
+if host == 'windows':
+    # Closing the job also stops descendants after their original parent exits.
+    # https://learn.microsoft.com/windows/win32/procthread/job-objects
+    import ctypes
+    from ctypes import wintypes
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [('process_time',ctypes.c_int64),('job_time',ctypes.c_int64),('flags',wintypes.DWORD),('min_working',ctypes.c_size_t),('max_working',ctypes.c_size_t),('active',wintypes.DWORD),('affinity',ctypes.c_size_t),('priority',wintypes.DWORD),('scheduling',wintypes.DWORD)]
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [('basic',BasicLimits),('io',ctypes.c_uint64*6),('process_memory',ctypes.c_size_t),('job_memory',ctypes.c_size_t),('peak_process',ctypes.c_size_t),('peak_job',ctypes.c_size_t)]
+    kernel = ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p,wintypes.LPCWSTR]
+    kernel.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+    kernel.SetInformationJobObject.restype = wintypes.BOOL
+    kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE,wintypes.HANDLE]
+    kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    def new_job():
+        handle = kernel.CreateJobObjectW(None,None)
+        if not handle: raise ctypes.WinError(ctypes.get_last_error())
+        limits = ExtendedLimits(); limits.basic.flags = 0x2000
+        if not kernel.SetInformationJobObject(handle,9,ctypes.byref(limits),ctypes.sizeof(limits)):
+            error = ctypes.get_last_error(); kernel.CloseHandle(handle); raise ctypes.WinError(error)
+        return handle
+
+def stop_child():
+    global child, job
+    if child is None: return
+    if host == 'windows':
+        if job:
+            kernel.CloseHandle(job); job = None
+        elif child.poll() is None:
+            subprocess.run(['taskkill.exe','/PID',str(child.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    else:
+        # The process group may still contain children after its leader exits.
+        try: os.killpg(child.pid,signal.SIGTERM)
+        except ProcessLookupError: pass
+        deadline = time.monotonic()+2
+        while time.monotonic() < deadline:
+            child.poll()
+            try: os.killpg(child.pid,0)
+            except ProcessLookupError: break
+            time.sleep(.1)
+        try: os.killpg(child.pid,signal.SIGKILL)
+        except ProcessLookupError: pass
+    try: child.wait(timeout=2)
+    except subprocess.TimeoutExpired: child.kill(); child.wait()
+    child = None
+
+def interrupted(signum, frame):
+    global stopping
+    stopping = True
+signal.signal(signal.SIGINT,interrupted)
+signal.signal(signal.SIGTERM,interrupted)
+def start():
+    global child, job
+    print('[WATCH] '+('Сборка и запуск; Ctrl+C для остановки' if lang == 'ru' else 'Build and run; Ctrl+C to stop'),flush=True)
+    if host == 'windows': job = new_job()
+    child = subprocess.Popen(command,cwd=root,env=env,start_new_session=(host != 'windows'))
+    if host == 'windows' and not kernel.AssignProcessToJobObject(job,int(child._handle)):
+        error = ctypes.get_last_error(); stop_child(); raise ctypes.WinError(error)
+try:
+    previous = snapshot(); start()
+    while not stopping:
+        time.sleep(.25)
+        current = snapshot()
+        if current == previous: continue
+        # Require one stable interval before rebuilding during a burst of writes.
+        time.sleep(.25)
+        stable = snapshot()
+        if stable != current: continue
+        previous = stable; stop_child(); start()
+finally:
+    stop_child()
+    if host == 'windows' and job: kernel.CloseHandle(job)
+PYWATCH
+}
+
+project_doctor() {
+    local failed=0 tool resolved
+    printf '[DOCTOR] %s\n' "$(ui 'Tools, versions and environment' 'Инструменты, версии и окружение')"
+    check_dependencies || failed=1
+    for tool in "${required_compilers[@]}"; do
+        resolved=$(command -v "$tool") || continue
+        printf '[PATH] %s -> %s\n' "$tool" "$resolved"
+        case "${tool##*/}" in java|javac) "$tool" -version 2>&1 | head -n 1 ;; *) "$tool" --version 2>&1 | head -n 1 ;; esac
+    done
+    if [[ "$has_py" -eq 1 ]]; then
+        if [[ ! -f "$TARGET_DIR/.venv/pyvenv.cfg" ]]; then
+            printf '[DOCTOR] %s\n' "$(ui 'No project .venv; run ghostnet setup .' 'Нет окружения .venv; выполните ghostnet setup .')"
+            [[ ! -f "$TARGET_DIR/requirements.txt" ]] || failed=1
+        elif [[ ! -x "$TARGET_DIR/.venv/bin/python" && ! -x "$TARGET_DIR/.venv/Scripts/python.exe" ]]; then
+            printf '[DOCTOR] .venv: %s\n' "$(ui 'Interpreter missing; repair .venv, then run ghostnet setup .' 'Интерпретатор не найден; восстановите .venv, затем выполните ghostnet setup .')"
+            failed=1
+        else
+            "$PYTHON_BIN" -m pip check || failed=1
+            if [[ -f "$TARGET_DIR/requirements.txt" ]]; then
+                "$PYTHON_BIN" - "$TARGET_DIR/requirements.txt" <<'PYDEPS' || failed=1
+import importlib.metadata, sys
+from pip._vendor.packaging.requirements import Requirement, InvalidRequirement
+missing = False
+for line in open(sys.argv[1], encoding='utf-8'):
+    line = line.strip()
+    if not line or line.startswith('#'): continue
+    try: requirement = Requirement(line.split(' #',1)[0])
+    except InvalidRequirement:
+        print('[DOCTOR] Review requirement:', line); missing = True; continue
+    if requirement.marker and not requirement.marker.evaluate(): continue
+    name = requirement.name
+    try:
+        version = importlib.metadata.version(name)
+        print('[PACKAGE]', name, version)
+        if requirement.specifier and not requirement.specifier.contains(version, prereleases=True):
+            print('[MISMATCH]', line, '-> ghostnet setup .'); missing = True
+    except importlib.metadata.PackageNotFoundError:
+        print('[MISSING]', name, '-> ghostnet setup .'); missing = True
+sys.exit(int(missing))
+PYDEPS
+            fi
+        fi
+    fi
+    if [[ "$PROJECT_BUILDER" == node && ! -d "$TARGET_DIR/node_modules" ]]; then
+        printf '[DOCTOR] %s\n' "$(ui 'No node_modules; run ghostnet setup .' 'Нет node_modules; выполните ghostnet setup .')"; failed=1
+    fi
+    return "$failed"
+}
+
+project_setup() {
+    local python_path stage
+    printf '[SETUP] %s\n' "$(ui 'Preparing project dependencies' 'Подготовка зависимостей проекта')"
+    check_dependencies || return 1
+    TARGET_DIR=$(cd -- "$TARGET_DIR" && pwd) || return 1
+    project_command() { (cd -- "$TARGET_DIR" && "$@"); }
+    if [[ "$has_py" -eq 1 && ( "$PROJECT_BUILDER" == python || -z "$PROJECT_BUILDER" || "$PROJECT_BUILDER" == none ) ]]; then
+        [[ ! -L "$TARGET_DIR/.venv" ]] || { printf '[SETUP] .venv: %s\n' "$(ui 'Symlinks are not supported.' 'Символические ссылки не поддерживаются.')" >&2; return 1; }
+        if [[ -e "$TARGET_DIR/.venv" && ! -f "$TARGET_DIR/.venv/pyvenv.cfg" ]]; then
+            printf '[SETUP] .venv: %s\n' "$(ui 'Existing folder is not a virtual environment.' 'Существующая папка не является виртуальным окружением.')" >&2; return 1
+        fi
+        if [[ ! -d "$TARGET_DIR/.venv" ]]; then
+            "$PYTHON_BIN" -m venv "$TARGET_DIR/.venv" || { printf '[SETUP] %s\n' "$(ui 'Could not create .venv; install Python venv support.' 'Не удалось создать .venv; установите поддержку Python venv.')" >&2; return 1; }
+        fi
+        python_path="$TARGET_DIR/.venv/bin/python"
+        [[ ! -x "$TARGET_DIR/.venv/Scripts/python.exe" ]] || python_path="$TARGET_DIR/.venv/Scripts/python.exe"
+        [[ -x "$python_path" ]] || { printf '[SETUP] %s\n' "$(ui 'The .venv interpreter is missing.' 'Интерпретатор .venv не найден.')" >&2; return 1; }
+        if [[ -f "$TARGET_DIR/requirements.txt" ]]; then
+            run_build "requirements.txt" project_command "$python_path" -m pip install -r requirements.txt || { printf '[SETUP] %s\n' "$(ui 'Failed to install requirements.txt; see pip output above.' 'Не удалось установить requirements.txt; см. вывод pip выше.')" >&2; return 1; }
+        elif [[ -f "$TARGET_DIR/pyproject.toml" ]] && "$python_path" -c 'import re,sys;sys.exit(not bool(re.search(r"(?m)^\s*\[build-system\]",open(sys.argv[1]).read())))' "$TARGET_DIR/pyproject.toml"; then
+            run_build "Python package" project_command "$python_path" -m pip install . || return 1
+        else
+            printf '[SETUP] %s\n' "$(ui '.venv ready; no dependency manifest to install.' '.venv готово; файл зависимостей для установки не найден.')"
+        fi
+        return 0
+    fi
+    case "$PROJECT_BUILDER" in
+        cargo) if [[ -f "$TARGET_DIR/Cargo.lock" ]]; then project_command cargo fetch --locked; else project_command cargo fetch; fi ;;
+        node) if [[ -f "$TARGET_DIR/package-lock.json" || -f "$TARGET_DIR/npm-shrinkwrap.json" ]]; then project_command npm ci; else project_command npm install; fi ;;
+        go) project_command go mod download ;;
+        dotnet) for stage in "${DOTNET_PROJECTS[@]}"; do project_command dotnet restore "$stage" || return 1; done ;;
+        maven) project_manager dependency:resolve ;;
+        gradle) project_manager dependencies ;;
+        swift) project_command swift package resolve ;;
+        cmake)
+            [[ ! -L "$TARGET_DIR/.ghostnet-build" && ! -L "$TARGET_DIR/.ghostnet-build/$HOST_KIND" ]] || return 1
+            project_command cmake -S . -B ".ghostnet-build/$HOST_KIND" -G Ninja -DCMAKE_BUILD_TYPE=Release ;;
+        *) printf '[SETUP] %s\n' "$(ui 'No standard dependency installer detected; use the project instructions.' 'Стандартный установщик зависимостей не найден; следуйте инструкции проекта.')" ;;
+    esac
+}
+
 case "$ACTION" in
+    clean) clean_inventory clean; exit $? ;;
+    watch) project_watch; exit $? ;;
+    doctor) project_doctor; exit $? ;;
+    setup) project_setup; exit $? ;;
     check) check_dependencies; exit $? ;;
     install) install_dependencies; exit $? ;;
     auto)
@@ -1253,6 +1642,11 @@ case "$ACTION" in
         ;;
     build|test) check_dependencies || exit 1 ;;
 esac
+
+if command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    CLEAN_BASE=$(mktemp "${TMPDIR:-/tmp}/ghostnet-outputs.XXXXXX" 2>/dev/null) || CLEAN_BASE=""
+    [[ -z "$CLEAN_BASE" ]] || clean_inventory begin >/dev/null 2>&1 || true
+fi
 
 echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Project folder ->${RESET} $TARGET_DIR"
 echo -e "${GREEN}[BUILD]${RESET} ${WHITE}Target platform ->${RESET} $DISPLAY_TARGET"
@@ -1332,6 +1726,7 @@ if [[ -n "$PROJECT_BUILDER" ]]; then
         esac
         exit $?
     fi
+    [[ -z "$CLEAN_BASE" ]] || clean_inventory record >/dev/null 2>&1 || true
     [[ "$ACTION" == test ]] || record_recent
     if [[ "$RUN_AFTER" == "1" ]]; then
         entry="${RUN_FILE:-$PROJECT_RUN}"
@@ -1525,6 +1920,7 @@ if [[ "$fail" -ne 0 ]]; then
     exit 1
 fi
 
+[[ -z "$CLEAN_BASE" ]] || clean_inventory record "${built_files[@]}" >/dev/null 2>&1 || true
 record_recent
 
 if [[ "$RUN_AFTER" == "1" ]]; then

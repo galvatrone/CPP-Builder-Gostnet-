@@ -11,6 +11,21 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     done
 fi
 export PATH="$(dirname -- "$selected_bash"):$PATH"
+# Only installed commands update; repository and standalone scripts remain independent.
+if [[ ! -f "$root/ban.sh" && ! -f "$root/../ban.sh" ]]; then
+    prefix=$(cd -- "$root/.." && pwd) || exit 1
+    helper="$prefix/share/ghostnet/ghostnet-update.py"
+    if [[ -f "$helper" ]]; then
+        export GHOSTNET_ROOT="$prefix" GHOSTNET_UPDATE_HELPER="$helper"
+        case "${1:-}" in
+            update|auto-update) exec python3 "$helper" --root "$prefix" "$@" ;;
+            --version|--help|-h|completion) ;;
+            *) python3 "$helper" --root "$prefix" --startup >/dev/null 2>&1 || true ;;
+        esac
+        payload=$(python3 "$helper" --root "$prefix" --payload) || exit 1
+        exec "$selected_bash" "$payload/ban-ru.sh" "$@"
+    fi
+fi
 if [[ -f "$root/ban-ru.sh" ]]; then
     exec "$selected_bash" "$root/ban-ru.sh" "$@"
 elif [[ -f "$root/../ban-ru.sh" ]]; then

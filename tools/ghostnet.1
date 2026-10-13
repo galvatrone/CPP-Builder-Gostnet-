@@ -1,0 +1,72 @@
+.TH GHOSTNET 1 "October 2026" "GHOSTNET 1.4.0" "User Commands"
+.SH NAME
+ghostnet \- prepare, build and run projects from the terminal
+.SH SYNOPSIS
+.B ghostnet
+.RI [ command ] " [options] [folder]"
+.SH DESCRIPTION
+GHOSTNET detects project descriptors and delegates to native project tools.
+Run without arguments for the animated arrow-key menu.
+English and Russian interfaces are available as ghostnet and ghostnet-ru.
+.SH COMMANDS
+.TP
+.B doctor [folder]
+Inspect tool paths, versions, project environment and Python requirements.
+No installation or build is performed.
+.TP
+.B setup [folder]
+Prepare dependencies explicitly. Python uses .venv and requirements.txt;
+Cargo uses fetch, npm uses ci with a lock file or install otherwise.
+CMake configures the project and lets its existing rules resolve dependencies.
+.TP
+.B build | run | test [folder]
+Build, build and run, or execute the project's native tests.
+.TP
+.B watch [folder]
+Build and run, then restart after source changes. Ctrl+C stops the launcher
+and running program. Dependency and generated directories are ignored.
+.TP
+.B clean [folder]
+Remove recorded GHOSTNET outputs that have not been modified.
+Sources, virtual environments and unrecorded files are preserved.
+.TP
+.B init --type TYPE folder
+Create a minimal project without overwriting existing files.
+.TP
+.B inspect | languages | recent
+Show project information, supported languages or recent projects.
+.TP
+.B update | auto-update enable | auto-update disable | auto-update status
+Update an installer-managed version or manage daily automatic updates.
+Package-managed installations use their package manager.
+.TP
+.B completion bash | zsh | powershell
+Print shell completion definitions for sourcing in your shell profile.
+.SH OPTIONS
+.TP
+.B --target native|linux|windows|macos|both
+Select platform; project tool adapters support native builds.
+.TP
+.B --mode MODE
+Override automatic builder detection.
+.TP
+.B --run-file PATH
+Select the project entry point.
+.TP
+.B --no-animation
+Disable terminal animations.
+.SH EXAMPLES
+.nf
+ghostnet doctor .
+ghostnet setup .
+ghostnet run --run-file app.py .
+ghostnet watch .
+ghostnet clean .
+ghostnet init --type cmake my-project
+.fi
+.SH FILES
+Build and Python dependency installation failures save reports under
+$XDG_STATE_HOME/ghostnet/reports or ~/.local/state/ghostnet/reports.
+Reports include the invoked command, tool versions and diagnostic output.
+.SH SEE ALSO
+.BR cmake (1), cargo (1), npm (1), python (1)
