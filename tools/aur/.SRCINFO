@@ -1,0 +1,35 @@
+pkgbase = ghostnet
+	pkgdesc = Terminal launcher for native builds, project tools and 17 languages
+	pkgver = 1.4.0
+	pkgrel = 1
+	url = https://github.com/galvatrone/CPP-Builder-Gostnet-
+	arch = any
+	license = MIT
+	depends = bash>=4.4
+	depends = python>=3.8
+	depends = curl
+	depends = coreutils
+	depends = findutils
+	depends = ncurses
+	optdepends = gcc: C and C++ compilation
+	optdepends = rust: Rust and Cargo projects
+	optdepends = go: Go projects
+	optdepends = jdk-openjdk: Java and Kotlin runtime
+	optdepends = nodejs: JavaScript and TypeScript runtime
+	optdepends = npm: Node project scripts
+	optdepends = typescript: standalone TypeScript compiler
+	optdepends = dotnet-sdk: C# and .NET projects
+	optdepends = ruby: Ruby scripts
+	optdepends = php: PHP scripts
+	optdepends = lua: Lua scripts
+	optdepends = kotlin: Kotlin compiler
+	optdepends = dart: Dart compiler
+	optdepends = zig: Zig compiler
+	optdepends = cmake: CMake projects
+	optdepends = ninja: CMake backend
+	optdepends = make: Make projects
+	optdepends = mingw-w64-gcc: Windows cross compilation
+	source = ghostnet-1.4.0.zip::https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/download/v1.4.0/ghostnet-linux.zip
+	sha256sums = c54df180613b9bf6729a0b97bb2c20fe5319e10edb0d276138fad68d0b57f421
+
+pkgname = ghostnet

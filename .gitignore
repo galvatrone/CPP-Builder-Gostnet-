@@ -33,3 +33,16 @@ __pycache__/
 /tests/test_data/
 /gostnet
 /gostnet-ru
+
+# Update runtime is public; AUR build outputs stay local
+!/tools/ghostnet-update.py
+!/tools/aur/
+/tools/aur/*
+!/tools/aur/PKGBUILD
+!/tools/aur/.SRCINFO
+
+# Shell help belongs to the installed runtime
+!/tools/ghostnet.bash
+!/tools/ghostnet.zsh
+!/tools/ghostnet.ps1
+!/tools/ghostnet.1

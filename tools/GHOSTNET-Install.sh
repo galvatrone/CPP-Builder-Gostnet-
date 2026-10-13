@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs on macOS system Bash 3.2 before modern Bash is installed.
 set -euo pipefail
-VERSION=v1.3.0
+VERSION=v1.4.0
 REPOSITORY=https://github.com/galvatrone/CPP-Builder-Gostnet-
 prefix="${HOME}/.local"
 yes=0; launch=1; remote=0
@@ -174,4 +174,8 @@ for name in files:
 PY
 export PATH="$prefix/bin:$PATH"
 printf 'Installed. Open a new terminal and run ghostnet or ghostnet-ru.\n'
+# Daily user scheduler, while startup checks also work without a scheduler.
+if [[ "${GHOSTNET_SKIP_SCHEDULE:-0}" != 1 && -f "$prefix/share/ghostnet/ghostnet-update.py" ]]; then
+    python3 "$prefix/share/ghostnet/ghostnet-update.py" --root "$prefix" auto-update enable || true
+fi
 if [[ "$launch" -eq 1 ]]; then "$prefix/bin/ghostnet"; fi

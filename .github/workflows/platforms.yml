@@ -81,7 +81,7 @@ jobs:
 
         [[ $(command -v ghostnet) -ef "$fixture/local tools/bin/ghostnet" ]]
 
-        ghostnet --version | grep ''1.3.0''
+        ghostnet --version | grep ''1.4.0''
 
         printf ''#include <iostream>\nint main(){std::cout<<"BOOTSTRAP_OK";}\n'' > "$fixture/main.cpp"
 
@@ -94,6 +94,238 @@ jobs:
         "$fixture/release tools/bin/ghostnet" --version | grep ''1.1.1''
 
         '
+    - name: Project environment, watch, clean and shell help
+      run: |
+        python3 - <<'PYLIFECYCLE'
+        import os, subprocess, tempfile, unittest
+        from pathlib import Path
+        ROOT=Path.cwd()
+        class LifecycleTests(unittest.TestCase):
+         def setUp(self):
+          self.tmp=tempfile.TemporaryDirectory(prefix="ghostnet lifecycle "); self.p=Path(self.tmp.name)
+          self.env=dict(os.environ, BAN_NO_ANIMATION="1", HOME=str(self.p/"home"), XDG_STATE_HOME=str(self.p/"state"), PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
+         def tearDown(self): self.tmp.cleanup()
+         def call(self, script, action, *args):
+          return subprocess.run(["bash",str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
+         def test_doctor_reports_python_and_missing_environment_without_writing(self):
+          (self.p/"app.py").write_text("print('ok')")
+          (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"doctor"); self.assertNotEqual(r.returncode,0); self.assertIn("[DOCTOR]",r.stdout); self.assertIn("ghostnet setup",r.stdout+r.stderr); self.assertFalse((self.p/".venv").exists()); self.assertFalse((self.p/".ghostnet-build").exists())
+         def test_setup_creates_reuses_venv_and_run_uses_it(self):
+          (self.p/"requirements.txt").write_text("")
+          (self.p/"app.py").write_text("import sys; print('VENV='+sys.prefix)")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"setup"); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           marker=self.p/".venv/keep"; marker.write_text("keep")
+           r=self.call(s,"setup"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue(marker.exists())
+           r=self.call(s,"run"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("VENV="+str(self.p/".venv"),r.stdout)
+         def test_setup_reports_package_failure(self):
+          (self.p/"app.py").write_text("print('ok')")
+          (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"setup"); self.assertNotEqual(r.returncode,0); self.assertIn("[SETUP]",r.stdout+r.stderr); self.assertIn("requirements.txt",r.stdout+r.stderr)
+         def test_setup_refuses_foreign_venv_folder(self):
+          (self.p/"app.py").write_text("print('ok')"); (self.p/".venv").mkdir(); marker=self.p/".venv/keep"; marker.write_text("keep")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"setup"); self.assertNotEqual(r.returncode,0); self.assertIn(".venv",r.stdout+r.stderr); self.assertEqual(marker.read_text(),"keep")
+         def test_doctor_detects_missing_package_in_existing_environment(self):
+          (self.p/"app.py").write_text("print('ok')")
+          (self.p/"requirements.txt").write_text("")
+          r=self.call("ban.sh","setup"); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
+          for script in ("ban.sh","ban-ru.sh"):
+           r=self.call(script,"doctor"); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("[MISSING]",r.stdout)
+         def test_watch_restarts_after_source_change_and_ignores_venv(self):
+          import time, signal
+          app=self.p/"app.py"; app.write_text("from pathlib import Path; Path('seen-one').touch()")
+          for script in ("ban.sh","ban-ru.sh"):
+           (self.p/"seen-one").unlink(missing_ok=True); (self.p/"seen-two").unlink(missing_ok=True)
+           app.write_text("from pathlib import Path; Path('seen-one').touch()")
+           log=self.p/"watch.log"
+           with log.open('w') as output:
+            proc=subprocess.Popen(['bash',str(ROOT/script),'watch','--no-animation',str(self.p)],env=self.env,stdout=output,stderr=output,start_new_session=(os.name != "nt"))
+            try:
+             deadline=time.monotonic()+10
+             while not (self.p/"seen-one").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
+             self.assertTrue((self.p/"seen-one").exists(),log.read_text())
+             app.write_text("from pathlib import Path; Path('seen-two').touch()")
+             deadline=time.monotonic()+10
+             while not (self.p/"seen-two").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
+             self.assertTrue((self.p/"seen-two").exists(),log.read_text())
+             time.sleep(.8); before=log.read_text().count('[WATCH]')
+             (self.p/".venv").mkdir(exist_ok=True); (self.p/".venv/ignored.py").write_text('bad python')
+             time.sleep(.8); self.assertEqual(log.read_text().count('[WATCH]'),before)
+            finally:
+             if proc.poll() is None:
+              if os.name == 'nt': subprocess.run(['taskkill.exe','/PID',str(proc.pid),'/T','/F'],capture_output=True)
+              else: os.killpg(proc.pid,signal.SIGTERM)
+             proc.wait(timeout=5)
+         def test_clean_removes_owned_binary_preserves_sources_venv_and_foreign_files(self):
+          (self.p/"main.cpp").write_text('int main(){}')
+          (self.p/".venv").mkdir(); (self.p/".venv/keep").write_text('keep')
+          for script in ("ban.sh","ban-ru.sh"):
+           r=self.call(script,"build"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((self.p/("main.exe" if os.name == "nt" else "main")).exists())
+           (self.p/".ghostnet-build").mkdir(exist_ok=True); (self.p/".ghostnet-build/foreign.txt").write_text('keep')
+           r=self.call(script,"clean"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertFalse((self.p/("main.exe" if os.name == "nt" else "main")).exists()); self.assertTrue((self.p/"main.cpp").exists()); self.assertEqual((self.p/".venv/keep").read_text(),'keep'); self.assertEqual((self.p/".ghostnet-build/foreign.txt").read_text(),'keep')
+         def test_clean_preserves_modified_build_output(self):
+          (self.p/"main.cpp").write_text('int main(){}')
+          r=self.call("ban.sh","build"); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          (self.p/("main.exe" if os.name == "nt" else "main")).write_text('user replacement')
+          r=self.call("ban.sh","clean"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertEqual((self.p/("main.exe" if os.name == "nt" else "main")).read_text(),'user replacement')
+         def test_failed_build_saves_command_versions_and_error_log(self):
+          (self.p/"main.cpp").write_text('not valid C++')
+          for script in ("ban.sh","ban-ru.sh"):
+           r=self.call(script,"build"); self.assertNotEqual(r.returncode,0)
+           reports=list((self.p/"state/ghostnet/reports").glob('*.log')); self.assertTrue(reports,r.stdout+r.stderr)
+           text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.0',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
+         def test_setup_installs_local_wheel_and_run_imports_package(self):
+          import zipfile
+          wheel=self.p/'ghostnet_probe-1.0-py3-none-any.whl'
+          with zipfile.ZipFile(wheel,'w') as z:
+           z.writestr('ghostnet_probe/__init__.py','VALUE="DEPENDENCY_OK"')
+           z.writestr('ghostnet_probe-1.0.dist-info/METADATA','Metadata-Version: 2.1\nName: ghostnet-probe\nVersion: 1.0\n')
+           z.writestr('ghostnet_probe-1.0.dist-info/WHEEL','Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n')
+           z.writestr('ghostnet_probe-1.0.dist-info/RECORD','')
+          (self.p/'requirements.txt').write_text(str(wheel))
+          (self.p/'app.py').write_text('from ghostnet_probe import VALUE; print(VALUE)')
+          for script in ('ban.sh','ban-ru.sh'):
+           r=self.call(script,'setup'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           r=self.call(script,'run'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('DEPENDENCY_OK',r.stdout)
+         def test_doctor_checks_version_constraints_and_environment_markers(self):
+          (self.p/'app.py').write_text('print("ok")'); (self.p/'requirements.txt').write_text('')
+          r=self.call('ban.sh','setup'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          for script in ('ban.sh','ban-ru.sh'):
+           (self.p/'requirements.txt').write_text('pip==0.0.1\n')
+           r=self.call(script,'doctor'); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('[MISMATCH]',r.stdout)
+           (self.p/'requirements.txt').write_text('nonexistent_ghostnet_dependency_xyz; python_version < "1.0"\n')
+           r=self.call(script,'doctor'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+         def test_completion_output_and_installed_manual(self):
+          for script in ('ban.sh','ban-ru.sh'):
+           for shell in ('bash','zsh','powershell'):
+            r=subprocess.run(['bash',str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
+            self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertNotIn('[SCAN',r.stdout); self.assertIn('doctor',r.stdout); self.assertIn('setup',r.stdout)
+           r=subprocess.run(['bash',str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
+           completion=self.p/'completion.sh'; completion.write_text(r.stdout)
+           r=subprocess.run(['bash','-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
+           self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('doctor',r.stdout)
+          prefix=self.p/'installed'
+          r=subprocess.run(['bash',str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
+          self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((prefix/'share/man/man1/ghostnet.1').exists())
+          self.assertTrue((prefix/'share/bash-completion/completions/ghostnet').exists())
+         def test_setup_requirements_with_nested_python_sources(self):
+          (self.p/'src').mkdir(); (self.p/'src/app.py').write_text('import sys; print("NESTED="+sys.prefix)')
+          (self.p/'requirements.txt').write_text('')
+          for script in ('ban.sh','ban-ru.sh'):
+           r=self.call(script,'setup'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((self.p/'.venv/pyvenv.cfg').exists())
+           r=self.call(script,'run','--run-file','src/app.py'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('NESTED='+str(self.p/'.venv'),r.stdout)
+         def test_doctor_rejects_broken_virtual_environment(self):
+          (self.p/'app.py').write_text('print("ok")'); (self.p/'.venv').mkdir(); (self.p/'.venv/pyvenv.cfg').write_text('home = /missing')
+          for script in ('ban.sh','ban-ru.sh'):
+           r=self.call(script,'doctor'); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('.venv',r.stdout+r.stderr)
+         def test_clean_preserves_old_modified_output_after_different_build(self):
+          (self.p/'main.cpp').write_text('int main(){}')
+          for script in ('ban.sh','ban-ru.sh'):
+           (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=first\n')
+           r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           first=self.p/'.ghostnet-build'/('windows' if os.name=='nt' else 'linux')/('first.exe' if os.name=='nt' else 'first'); first.write_text('user replacement')
+           (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=second\n')
+           r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           r=self.call(script,'clean'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue(first.exists(),r.stdout+r.stderr); self.assertEqual(first.read_text(),'user replacement')
+         @unittest.skipIf(os.name=='nt','Unix process group contract')
+         def test_watch_stops_descendants_after_the_program_exits(self):
+          import signal,time
+          (self.p/'app.py').write_text("import subprocess,sys\nfrom pathlib import Path\np=subprocess.Popen([sys.executable,'-c','import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(90)'])\nPath('descendant.pid').write_text(str(p.pid))\n")
+          def alive(pid):
+           try:
+            stat=Path('/proc')/str(pid)/'stat'
+            if stat.exists() and stat.read_text().split()[2]=='Z': return False
+            os.kill(pid,0); return True
+           except ProcessLookupError: return False
+          for script in ('ban.sh','ban-ru.sh'):
+           marker=self.p/'descendant.pid'; marker.unlink(missing_ok=True); pid=None
+           with (self.p/'orphan.log').open('w') as out:
+            proc=subprocess.Popen(['bash',str(ROOT/script),'watch',str(self.p)],env=self.env,stdout=out,stderr=out,start_new_session=True)
+            try:
+             deadline=time.monotonic()+10
+             while not marker.exists() and proc.poll() is None and time.monotonic()<deadline:time.sleep(.1)
+             self.assertTrue(marker.exists(),(self.p/'orphan.log').read_text()); pid=int(marker.read_text()); time.sleep(.6)
+             os.killpg(proc.pid,signal.SIGTERM); proc.wait(timeout=6)
+             deadline=time.monotonic()+3
+             while alive(pid) and time.monotonic()<deadline: time.sleep(.1)
+             self.assertFalse(alive(pid),'watch left its program descendant running')
+            finally:
+             if proc.poll() is None: os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+             if pid and alive(pid): os.kill(pid,signal.SIGKILL)
+        if __name__=="__main__": unittest.main()
+        PYLIFECYCLE
+    - name: Verified updater failure and atomic activation contracts
+      if: runner.os == 'Linux'
+      run: |
+        python3 - <<'PYUPDATES'
+        import hashlib,json,os,pathlib,subprocess,tempfile,unittest,zipfile
+        ROOT=pathlib.Path.cwd()
+        class Updates(unittest.TestCase):
+         def setUp(self):
+          self.tmp=tempfile.TemporaryDirectory(prefix='ghostnet update ');self.p=pathlib.Path(self.tmp.name);self.prefix=self.p/'installed';self.share=self.prefix/'share/ghostnet';self.share.mkdir(parents=True)
+          (self.share/'install-mode').write_text('installer');(self.share/'ban.sh').write_text('OLD');(self.share/'ban-ru.sh').write_text('OLD_RU')
+          self.mocks=self.p/'mocks';self.mocks.mkdir();self.archive=self.p/'ghostnet-linux.zip'
+          with zipfile.ZipFile(self.archive,'w') as z:
+           for name,data in [('ban.sh','#!/bin/bash\necho NEW'),('ban-ru.sh','#!/bin/bash\necho NEW_RU'),('ghostnet','#!/bin/bash'),('ghostnet-ru','#!/bin/bash'),('install.sh','#!/bin/bash'),('ghostnet-update.py','# updated helper')]:z.writestr('GHOSTNET/'+name,data)
+          self.sums=self.p/'SHA256SUMS';self.sums.write_text(hashlib.sha256(self.archive.read_bytes()).hexdigest()+'  ghostnet-linux.zip\n')
+          (self.mocks/'curl').write_text('''#!/usr/bin/env python3
+        import os,sys,shutil
+        args=sys.argv[1:]
+        if '--head' in args:print('https://github.com/galvatrone/CPP-Builder-Gostnet-/releases/tag/v9.0.0',end='');sys.exit(0)
+        name='SHA256SUMS' if args[args.index('--output')-1].endswith('SHA256SUMS') else 'ghostnet-linux.zip'
+        shutil.copyfile(os.environ['FIXTURE']+'/'+name,args[args.index('--output')+1])
+        ''');(self.mocks/'curl').chmod(0o755)
+          (self.mocks/'systemctl').write_text('#!/bin/bash\nexit 0\n');(self.mocks/'systemctl').chmod(0o755)
+          self.env=dict(os.environ,HOME=str(self.p/'home'),XDG_STATE_HOME=str(self.p/'state'),FIXTURE=str(self.p),PATH=str(self.mocks)+':'+os.environ['PATH'])
+         def tearDown(self):self.tmp.cleanup()
+         def call(self,*args):return subprocess.run(['python3',str(ROOT/'tools/ghostnet-update.py'),'--root',str(self.prefix),*args],env=self.env,text=True,capture_output=True,timeout=20)
+         def test_verified_update_switches_complete_payload(self):
+          r=self.call('update');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          state=json.loads((self.share/'active.json').read_text());payload=pathlib.Path(state['Payload']);self.assertEqual((payload/'ban.sh').read_text(),'#!/bin/bash\necho NEW');self.assertEqual(state['Version'],'v9.0.0');self.assertEqual((self.share/'ban.sh').read_text(),'OLD')
+         def test_bad_checksum_keeps_previous_payload(self):
+          self.sums.write_text('0'*64+'  ghostnet-linux.zip\n');r=self.call('update');self.assertNotEqual(r.returncode,0);self.assertFalse((self.share/'active.json').exists());self.assertEqual((self.share/'ban.sh').read_text(),'OLD')
+         def test_unsafe_archive_rejected_even_with_valid_checksum(self):
+          with zipfile.ZipFile(self.archive,'a') as z:z.writestr('GHOSTNET/../escape','BAD')
+          self.sums.write_text(hashlib.sha256(self.archive.read_bytes()).hexdigest()+'  ghostnet-linux.zip\n');r=self.call('update');self.assertNotEqual(r.returncode,0);self.assertFalse((self.share/'active.json').exists());self.assertFalse((self.prefix/'escape').exists())
+         def test_offline_startup_never_prevents_work(self):
+          (self.mocks/'curl').write_text('#!/bin/bash\nexit 7\n');r=self.call('--startup');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertFalse((self.share/'active.json').exists())
+         def test_package_owned_install_never_replaces_payload(self):
+          (self.share/'install-mode').write_text('aur');r=self.call('--background');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertFalse((self.share/'active.json').exists());self.assertEqual((self.share/'ban.sh').read_text(),'OLD')
+
+         def test_installed_command_uses_activated_payload(self):
+          r=subprocess.run(['bash',str(ROOT/'tools/install.sh'),'--prefix',str(self.prefix)],env=self.env,capture_output=True,text=True)
+          self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          new=self.share/'versions/test';new.mkdir(parents=True);(new/'ban.sh').write_text('#!/bin/bash\nprintf ACTIVATED');(new/'ban-ru.sh').write_text('#!/bin/bash\nprintf АКТИВНАЯ')
+          (self.share/'active.json').write_text(json.dumps({'Version':'v9.0.0','Payload':str(new)}))
+          r=subprocess.run([str(self.prefix/'bin/ghostnet'),'--version'],env=self.env,capture_output=True,text=True)
+          self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertIn('ACTIVATED',r.stdout)
+         def test_disabled_auto_update_makes_no_network_request(self):
+          r=self.call('auto-update','disable');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          (self.mocks/'curl').write_text('#!/bin/bash\ntouch "$FIXTURE/contacted"\nexit 7\n')
+          r=self.call('--startup');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertFalse((self.p/'contacted').exists())
+
+         def test_scheduler_enable_records_daily_user_timer(self):
+          r=self.call('auto-update','enable');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          unit=next((self.p/'home/.config/systemd/user').glob('*.service'));timer=next(unit.parent.glob('*.timer'))
+          self.assertIn('--background',unit.read_text());self.assertIn(str(self.prefix),unit.read_text());self.assertIn('OnCalendar=daily',timer.read_text());self.assertIn('"scheduled": true',r.stdout)
+         def test_scheduler_error_is_reported_not_claimed_enabled(self):
+          (self.mocks/'systemctl').write_text('#!/bin/bash\nexit 1\n');r=self.call('auto-update','enable');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertIn('"scheduled": false',r.stdout)
+
+         def test_abandoned_lock_does_not_permanently_disable_updates(self):
+          folder=self.p/'state/ghostnet/updates'/hashlib.sha256(str(self.prefix).encode()).hexdigest()[:12];lock=folder/'lock';lock.mkdir(parents=True);os.utime(lock,(0,0))
+          r=self.call('--background');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertTrue((self.share/'active.json').exists(),r.stdout+r.stderr)
+
+         def test_windows_powershell_utf8_bom_metadata_is_readable(self):
+          (self.prefix/'installation.json').write_text(json.dumps({'Version':'v9.0.0','Payload':str(self.share),'MsysRoot':'C:\\msys64'}),encoding='utf-8-sig')
+          r=self.call('--payload');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertEqual(r.stdout.strip(),str(self.share))
+
+        unittest.main()
+        PYUPDATES
   windows:
     runs-on: windows-latest
     steps:
@@ -135,6 +367,172 @@ jobs:
         cmd.exe //c tools\\ban-ru.cmd --help
 
         '
+    - name: Project environment, watch, clean and shell help
+      shell: msys2 {0}
+      run: |
+        python - <<'PYLIFECYCLE'
+        import os, subprocess, tempfile, unittest
+        from pathlib import Path
+        ROOT=Path.cwd()
+        class LifecycleTests(unittest.TestCase):
+         def setUp(self):
+          self.tmp=tempfile.TemporaryDirectory(prefix="ghostnet lifecycle "); self.p=Path(self.tmp.name)
+          self.env=dict(os.environ, BAN_NO_ANIMATION="1", HOME=str(self.p/"home"), XDG_STATE_HOME=str(self.p/"state"), PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
+         def tearDown(self): self.tmp.cleanup()
+         def call(self, script, action, *args):
+          return subprocess.run(["bash",str(ROOT/script),action,"--target","native",*args,str(self.p)],env=self.env,text=True,capture_output=True,timeout=60)
+         def test_doctor_reports_python_and_missing_environment_without_writing(self):
+          (self.p/"app.py").write_text("print('ok')")
+          (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"doctor"); self.assertNotEqual(r.returncode,0); self.assertIn("[DOCTOR]",r.stdout); self.assertIn("ghostnet setup",r.stdout+r.stderr); self.assertFalse((self.p/".venv").exists()); self.assertFalse((self.p/".ghostnet-build").exists())
+         def test_setup_creates_reuses_venv_and_run_uses_it(self):
+          (self.p/"requirements.txt").write_text("")
+          (self.p/"app.py").write_text("import sys; print('VENV='+sys.prefix)")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"setup"); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           marker=self.p/".venv/keep"; marker.write_text("keep")
+           r=self.call(s,"setup"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue(marker.exists())
+           r=self.call(s,"run"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("VENV="+str(self.p/".venv"),r.stdout)
+         def test_setup_reports_package_failure(self):
+          (self.p/"app.py").write_text("print('ok')")
+          (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"setup"); self.assertNotEqual(r.returncode,0); self.assertIn("[SETUP]",r.stdout+r.stderr); self.assertIn("requirements.txt",r.stdout+r.stderr)
+         def test_setup_refuses_foreign_venv_folder(self):
+          (self.p/"app.py").write_text("print('ok')"); (self.p/".venv").mkdir(); marker=self.p/".venv/keep"; marker.write_text("keep")
+          for s in ("ban.sh","ban-ru.sh"):
+           r=self.call(s,"setup"); self.assertNotEqual(r.returncode,0); self.assertIn(".venv",r.stdout+r.stderr); self.assertEqual(marker.read_text(),"keep")
+         def test_doctor_detects_missing_package_in_existing_environment(self):
+          (self.p/"app.py").write_text("print('ok')")
+          (self.p/"requirements.txt").write_text("")
+          r=self.call("ban.sh","setup"); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          (self.p/"requirements.txt").write_text("nonexistent_ghostnet_dependency_xyz==1.0\n")
+          for script in ("ban.sh","ban-ru.sh"):
+           r=self.call(script,"doctor"); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("[MISSING]",r.stdout)
+         def test_watch_restarts_after_source_change_and_ignores_venv(self):
+          import time, signal
+          app=self.p/"app.py"; app.write_text("from pathlib import Path; Path('seen-one').touch()")
+          for script in ("ban.sh","ban-ru.sh"):
+           (self.p/"seen-one").unlink(missing_ok=True); (self.p/"seen-two").unlink(missing_ok=True)
+           app.write_text("from pathlib import Path; Path('seen-one').touch()")
+           log=self.p/"watch.log"
+           with log.open('w') as output:
+            proc=subprocess.Popen(['bash',str(ROOT/script),'watch','--no-animation',str(self.p)],env=self.env,stdout=output,stderr=output,start_new_session=(os.name != "nt"))
+            try:
+             deadline=time.monotonic()+10
+             while not (self.p/"seen-one").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
+             self.assertTrue((self.p/"seen-one").exists(),log.read_text())
+             app.write_text("from pathlib import Path; Path('seen-two').touch()")
+             deadline=time.monotonic()+10
+             while not (self.p/"seen-two").exists() and proc.poll() is None and time.monotonic()<deadline: time.sleep(.1)
+             self.assertTrue((self.p/"seen-two").exists(),log.read_text())
+             time.sleep(.8); before=log.read_text().count('[WATCH]')
+             (self.p/".venv").mkdir(exist_ok=True); (self.p/".venv/ignored.py").write_text('bad python')
+             time.sleep(.8); self.assertEqual(log.read_text().count('[WATCH]'),before)
+            finally:
+             if proc.poll() is None:
+              if os.name == 'nt': subprocess.run(['taskkill.exe','/PID',str(proc.pid),'/T','/F'],capture_output=True)
+              else: os.killpg(proc.pid,signal.SIGTERM)
+             proc.wait(timeout=5)
+         def test_clean_removes_owned_binary_preserves_sources_venv_and_foreign_files(self):
+          (self.p/"main.cpp").write_text('int main(){}')
+          (self.p/".venv").mkdir(); (self.p/".venv/keep").write_text('keep')
+          for script in ("ban.sh","ban-ru.sh"):
+           r=self.call(script,"build"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((self.p/("main.exe" if os.name == "nt" else "main")).exists())
+           (self.p/".ghostnet-build").mkdir(exist_ok=True); (self.p/".ghostnet-build/foreign.txt").write_text('keep')
+           r=self.call(script,"clean"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertFalse((self.p/("main.exe" if os.name == "nt" else "main")).exists()); self.assertTrue((self.p/"main.cpp").exists()); self.assertEqual((self.p/".venv/keep").read_text(),'keep'); self.assertEqual((self.p/".ghostnet-build/foreign.txt").read_text(),'keep')
+         def test_clean_preserves_modified_build_output(self):
+          (self.p/"main.cpp").write_text('int main(){}')
+          r=self.call("ban.sh","build"); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          (self.p/("main.exe" if os.name == "nt" else "main")).write_text('user replacement')
+          r=self.call("ban.sh","clean"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertEqual((self.p/("main.exe" if os.name == "nt" else "main")).read_text(),'user replacement')
+         def test_failed_build_saves_command_versions_and_error_log(self):
+          (self.p/"main.cpp").write_text('not valid C++')
+          for script in ("ban.sh","ban-ru.sh"):
+           r=self.call(script,"build"); self.assertNotEqual(r.returncode,0)
+           reports=list((self.p/"state/ghostnet/reports").glob('*.log')); self.assertTrue(reports,r.stdout+r.stderr)
+           text=reports[-1].read_text(); self.assertIn('g++',text); self.assertIn('main.cpp',text); self.assertIn('error:',text); self.assertIn('GHOSTNET 1.4.0',text); self.assertIn('[REPORT]',r.stdout+r.stderr)
+         def test_setup_installs_local_wheel_and_run_imports_package(self):
+          import zipfile
+          wheel=self.p/'ghostnet_probe-1.0-py3-none-any.whl'
+          with zipfile.ZipFile(wheel,'w') as z:
+           z.writestr('ghostnet_probe/__init__.py','VALUE="DEPENDENCY_OK"')
+           z.writestr('ghostnet_probe-1.0.dist-info/METADATA','Metadata-Version: 2.1\nName: ghostnet-probe\nVersion: 1.0\n')
+           z.writestr('ghostnet_probe-1.0.dist-info/WHEEL','Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n')
+           z.writestr('ghostnet_probe-1.0.dist-info/RECORD','')
+          (self.p/'requirements.txt').write_text(str(wheel))
+          (self.p/'app.py').write_text('from ghostnet_probe import VALUE; print(VALUE)')
+          for script in ('ban.sh','ban-ru.sh'):
+           r=self.call(script,'setup'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           r=self.call(script,'run'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('DEPENDENCY_OK',r.stdout)
+         def test_doctor_checks_version_constraints_and_environment_markers(self):
+          (self.p/'app.py').write_text('print("ok")'); (self.p/'requirements.txt').write_text('')
+          r=self.call('ban.sh','setup'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+          for script in ('ban.sh','ban-ru.sh'):
+           (self.p/'requirements.txt').write_text('pip==0.0.1\n')
+           r=self.call(script,'doctor'); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('[MISMATCH]',r.stdout)
+           (self.p/'requirements.txt').write_text('nonexistent_ghostnet_dependency_xyz; python_version < "1.0"\n')
+           r=self.call(script,'doctor'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+         def test_completion_output_and_installed_manual(self):
+          for script in ('ban.sh','ban-ru.sh'):
+           for shell in ('bash','zsh','powershell'):
+            r=subprocess.run(['bash',str(ROOT/script),'completion',shell],capture_output=True,text=True,env=self.env)
+            self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertNotIn('[SCAN',r.stdout); self.assertIn('doctor',r.stdout); self.assertIn('setup',r.stdout)
+           r=subprocess.run(['bash',str(ROOT/script),'completion','bash'],capture_output=True,text=True,env=self.env)
+           completion=self.p/'completion.sh'; completion.write_text(r.stdout)
+           r=subprocess.run(['bash','-c','source "$1"; COMP_WORDS=(ghostnet do); COMP_CWORD=1; _ghostnet_complete; printf "%s\n" "${COMPREPLY[@]}"','completion',str(completion)],capture_output=True,text=True,env=self.env)
+           self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('doctor',r.stdout)
+          prefix=self.p/'installed'
+          r=subprocess.run(['bash',str(ROOT/'tools/install.sh'),'--prefix',str(prefix)],capture_output=True,text=True,env=self.env)
+          self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((prefix/'share/man/man1/ghostnet.1').exists())
+          self.assertTrue((prefix/'share/bash-completion/completions/ghostnet').exists())
+         def test_setup_requirements_with_nested_python_sources(self):
+          (self.p/'src').mkdir(); (self.p/'src/app.py').write_text('import sys; print("NESTED="+sys.prefix)')
+          (self.p/'requirements.txt').write_text('')
+          for script in ('ban.sh','ban-ru.sh'):
+           r=self.call(script,'setup'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue((self.p/'.venv/pyvenv.cfg').exists())
+           r=self.call(script,'run','--run-file','src/app.py'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('NESTED='+str(self.p/'.venv'),r.stdout)
+         def test_doctor_rejects_broken_virtual_environment(self):
+          (self.p/'app.py').write_text('print("ok")'); (self.p/'.venv').mkdir(); (self.p/'.venv/pyvenv.cfg').write_text('home = /missing')
+          for script in ('ban.sh','ban-ru.sh'):
+           r=self.call(script,'doctor'); self.assertNotEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn('.venv',r.stdout+r.stderr)
+         def test_clean_preserves_old_modified_output_after_different_build(self):
+          (self.p/'main.cpp').write_text('int main(){}')
+          for script in ('ban.sh','ban-ru.sh'):
+           (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=first\n')
+           r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           first=self.p/'.ghostnet-build'/('windows' if os.name=='nt' else 'linux')/('first.exe' if os.name=='nt' else 'first'); first.write_text('user replacement')
+           (self.p/'ghostnet.conf').write_text('builder=cpp\noutput=second\n')
+           r=self.call(script,'build'); self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+           r=self.call(script,'clean'); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertTrue(first.exists(),r.stdout+r.stderr); self.assertEqual(first.read_text(),'user replacement')
+         @unittest.skipIf(os.name=='nt','Unix process group contract')
+         def test_watch_stops_descendants_after_the_program_exits(self):
+          import signal,time
+          (self.p/'app.py').write_text("import subprocess,sys\nfrom pathlib import Path\np=subprocess.Popen([sys.executable,'-c','import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(90)'])\nPath('descendant.pid').write_text(str(p.pid))\n")
+          def alive(pid):
+           try:
+            stat=Path('/proc')/str(pid)/'stat'
+            if stat.exists() and stat.read_text().split()[2]=='Z': return False
+            os.kill(pid,0); return True
+           except ProcessLookupError: return False
+          for script in ('ban.sh','ban-ru.sh'):
+           marker=self.p/'descendant.pid'; marker.unlink(missing_ok=True); pid=None
+           with (self.p/'orphan.log').open('w') as out:
+            proc=subprocess.Popen(['bash',str(ROOT/script),'watch',str(self.p)],env=self.env,stdout=out,stderr=out,start_new_session=True)
+            try:
+             deadline=time.monotonic()+10
+             while not marker.exists() and proc.poll() is None and time.monotonic()<deadline:time.sleep(.1)
+             self.assertTrue(marker.exists(),(self.p/'orphan.log').read_text()); pid=int(marker.read_text()); time.sleep(.6)
+             os.killpg(proc.pid,signal.SIGTERM); proc.wait(timeout=6)
+             deadline=time.monotonic()+3
+             while alive(pid) and time.monotonic()<deadline: time.sleep(.1)
+             self.assertFalse(alive(pid),'watch left its program descendant running')
+            finally:
+             if proc.poll() is None: os.killpg(proc.pid,signal.SIGKILL);proc.wait()
+             if pid and alive(pid): os.kill(pid,signal.SIGKILL)
+        if __name__=="__main__": unittest.main()
+        PYLIFECYCLE
   native-installer:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -215,6 +613,75 @@ jobs:
         \ command failed'\n    Write-Host 'PASS: single-file install, native cmd/PowerShell commands, cwd, PATH\
         \ and update'\n} finally {\n    [Environment]::SetEnvironmentVariable('Path',$OriginalPath,'User')\n   \
         \ Remove-Item -LiteralPath $TestRoot -Recurse -Force -ErrorAction SilentlyContinue\n}\n"
+    - name: Current Windows bridge and daily update task
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $Repo = (Get-Location).Path
+        $Text = Get-Content -LiteralPath tools/GHOSTNET-Install.cmd -Raw
+        $Body = ($Text -split '(?m)^# GHOSTNET POWERSHELL START\r?$',2)[1]
+        $Tokens=$null; $Errors=$null
+        $Ast=[System.Management.Automation.Language.Parser]::ParseInput($Body,[ref]$Tokens,[ref]$Errors)
+        if ($Errors.Count) { throw ($Errors | Out-String) }
+        $Ast.FindAll({param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false) | ForEach-Object { . ([scriptblock]::Create($_.Extent.Text)) }
+        $Fixture=Join-Path $env:TEMP ('ghostnet updater '+[guid]::NewGuid())
+        $Root=Join-Path $Fixture 'installed application'
+        $Payload=Join-Path $Root 'versions\current'
+        New-Item -ItemType Directory -Path $Payload -Force | Out-Null
+        function Assert($Condition,$Message) { if (!$Condition) { throw $Message } }
+        try {
+            foreach ($Name in 'ban.sh','ban-ru.sh') { Copy-Item -LiteralPath (Join-Path $Repo $Name) -Destination $Payload }
+            foreach ($Name in 'ghostnet','ghostnet-ru','ghostnet-update.py','ghostnet.bash','ghostnet.zsh','ghostnet.ps1','ghostnet.1') {
+                Copy-Item -LiteralPath (Join-Path $Repo "tools/$Name") -Destination $Payload
+            }
+            Copy-Item -LiteralPath (Join-Path $Repo 'tools/ghostnet-update.py') -Destination $Root
+            Write-ActiveState $Root 'v1.4.0' $Payload $env:MSYS2_ROOT
+            Write-Bridges $Root
+            $Command=Join-Path $Root 'bin\ghostnet.cmd'
+            $RuCommand=Join-Path $Root 'bin\ghostnet-ru.cmd'
+            $Output=& $Command --version
+            Assert ($LASTEXITCODE -eq 0 -and "$Output" -match '1.4.0') 'New installed bridge cannot launch payload'
+            & $RuCommand completion powershell | Out-Null
+            Assert ($LASTEXITCODE -eq 0) 'Completion forwarding failed'
+            $CompletionText=Get-Content -LiteralPath tools/ghostnet.ps1 -Raw
+            $Tokens=$null; $Errors=$null
+            [System.Management.Automation.Language.Parser]::ParseInput($CompletionText,[ref]$Tokens,[ref]$Errors) | Out-Null
+            Assert ($Errors.Count -eq 0) 'PowerShell completion syntax failed'
+            & $Command auto-update enable
+            Assert ($LASTEXITCODE -eq 0) 'Scheduler command failed'
+            $Status=(& $Command auto-update status | Out-String | ConvertFrom-Json)
+            Assert ($Status.enabled -and $Status.scheduled) 'Daily Windows task was not registered'
+            & $Command auto-update disable
+            Assert ($LASTEXITCODE -eq 0) 'Disabling updates failed'
+            $Status=(& $Command auto-update status | Out-String | ConvertFrom-Json)
+            Assert (!$Status.enabled -and !$Status.scheduled) 'Disabling updates left the task active'
+            $Project=Join-Path $Fixture 'watch project'
+            New-Item -ItemType Directory -Path $Project | Out-Null
+            Set-Content -LiteralPath (Join-Path $Project 'app.py') -Encoding ASCII -Value @'
+        import subprocess,sys
+        from pathlib import Path
+        p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(90)'])
+        Path('descendant.pid').write_text(str(p.pid))
+        '@
+            $Watch=Start-Process -FilePath $env:ComSpec -ArgumentList ('/d /c ""{0}" watch --no-animation "{1}""' -f $Command,$Project) -PassThru -RedirectStandardOutput (Join-Path $Fixture 'watch.out') -RedirectStandardError (Join-Path $Fixture 'watch.err')
+            $Marker=Join-Path $Project 'descendant.pid'
+            $Deadline=(Get-Date).AddSeconds(30)
+            while (!(Test-Path -LiteralPath $Marker) -and (Get-Date) -lt $Deadline -and !$Watch.HasExited) { Start-Sleep -Milliseconds 200; $Watch.Refresh() }
+            Assert (Test-Path -LiteralPath $Marker) ('Watch failed: '+(Get-Content -LiteralPath (Join-Path $Fixture 'watch.err') -Raw))
+            $Descendant=[int](Get-Content -LiteralPath $Marker)
+            Start-Sleep -Seconds 1
+            & taskkill.exe /PID $Watch.Id /T /F | Out-Null
+            Start-Sleep -Seconds 1
+            Assert (!(Get-Process -Id $Descendant -ErrorAction SilentlyContinue)) 'Windows watch left an orphaned program running'
+            & $Command update --yes --no-launch
+            Assert ($LASTEXITCODE -eq 0) 'Manual stable release check failed'
+            Write-Host 'PASS: new bridge, both interfaces, completion and actual daily task registration/removal'
+        } finally {
+            if ($Watch -and !$Watch.HasExited) { & taskkill.exe /PID $Watch.Id /T /F | Out-Null }
+            if ($Descendant) { Stop-Process -Id $Descendant -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath (Join-Path $Root 'bin\ghostnet.cmd')) { & (Join-Path $Root 'bin\ghostnet.cmd') auto-update disable | Out-Null }
+            Remove-Item -LiteralPath $Fixture -Recurse -Force -ErrorAction SilentlyContinue
+        }
   languages:
     strategy:
       fail-fast: false
